@@ -10,7 +10,7 @@ This document fixes the boundaries between a board-neutral machine, the Karabas 
 
 ## 2. Modules
 
-Both modules exist as interface skeletons with empty bodies. They are in no build yet.
+`karabas_keyboard` has its body, moved from the three tops without changes; the tops instantiate it. `rk86_machine` is still an interface skeleton with an empty body and is in no build yet.
 
 ### `rk86_machine` (`src/rtl/rk86_machine.v`)
 
@@ -34,7 +34,7 @@ The machine needs a timebase provider. It takes `cce`, `hrtc` and `vrtc` as inpu
 
 ### `karabas_keyboard` (`src/rtl/karabas_keyboard.v`)
 
-It will contain the conversion of HID reports and joysticks from the MCU to the keyboard matrix of the Radio-86RK, and the autorun macros (`macros`).
+It contains the conversion of HID reports and joysticks from the MCU to the keyboard matrix of the Radio-86RK (`hid_parser`), and the autorun macros (`macros`). The body is the one of the board tops, moved without changes.
 
 | Group | Ports |
 |---|---|

@@ -107,12 +107,9 @@ host_video_hs,,-,y,y,video,platform,
 host_video_r,,-,y,y,video,platform,
 host_video_vs,,-,y,y,video,platform,
 inte,,y,y,y,sound,rk86_machine.inte;platform,"sound source, mixed in the board"
-joy_bus,,y,y,y,keyboard,internal:karabas_keyboard,keyboard internal
 joy_l,,y,y,y,keyboard,karabas_keyboard.joy_l;platform,from the MCU
 joy_r,,y,y,y,keyboard,karabas_keyboard.joy_r;platform,from the MCU
 joy_rst,,y,y,y,keyboard,karabas_keyboard.joy_rst;platform,also used by the platform
-kb_joy_type_l,,y,y,y,keyboard,internal:karabas_keyboard,"implicit 1-bit nets into 3-bit inputs, undriven"
-kb_joy_type_r,,y,y,y,keyboard,internal:karabas_keyboard,"implicit 1-bit nets into 3-bit inputs, undriven"
 kbd_o,,y,y,y,keyboard,rk86_machine.kbd_cols;karabas_keyboard.kbd_cols,keyboard columns
 kbd_shift,,y,y,y,keyboard,rk86_machine.kbd_shift;karabas_keyboard.kbd_shift,PC7..PC5
 load_a,,y,y,y,memory,platform,stays in the board top
@@ -126,7 +123,6 @@ loader_ram_wr,,y,y,y,memory,platform,stays in the board top
 loading,,y,y,y,platform,karabas_keyboard.loading;platform,also used by the platform
 locked,,y,y,y,platform,platform,
 MA,,y,y,y,memory,platform,stays in the board top
-macros_act,,y,y,y,keyboard,internal:karabas_keyboard,keyboard internal
 mcu_burst_ready,,y,y,y,platform,platform,
 MCU_CS_N,,y,y,y,platform,platform,
 MCU_IO,,y,y,y,platform,platform,
@@ -176,7 +172,6 @@ SDR_WE_N,,y,y,y,platform,platform,
 softsw_command,,y,y,y,platform,platform,
 sound,,y,y,y,sound,platform,per-board mixing differs
 startup,,y,y,y,machine,rk86_machine.startup;platform,"startup flag, also used by the ROM address in the board"
-symbol,,y,y,y,keyboard,internal:karabas_keyboard,keyboard internal
 TAPE_IN,,y,y,y,platform,rk86_machine.tape_in,PC4
 TAPE_OUT,,y,y,y,sound,platform,per-board mixing differs
 tmds_blue,,-,y,y,video,platform,
