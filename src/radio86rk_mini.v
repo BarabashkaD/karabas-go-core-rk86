@@ -296,44 +296,28 @@ mcu mcu(
 wire[7:0] kbd_o;
 wire[2:0] kbd_shift;
 
-wire[7:0] symbol;
-wire macros_act;
-
 wire loaded_done;
 
-hid_parser hid_parser(
-	.CLK(clk50),
-	.RESET(areset),
-	.OSD_ACT(osd_act),
-	
-	.KB_STATUS(hid_kb_status),
-	.KB_DAT0((macros_act & loaded_done)? symbol : hid_kb_dat0),
-	.KB_DAT1(hid_kb_dat1),
-	.KB_DAT2(hid_kb_dat2),
-	.KB_DAT3(hid_kb_dat3),
-	.KB_DAT4(hid_kb_dat4),
-	.KB_DAT5(hid_kb_dat5),
-
-	.JOY_TYPE_L(kb_joy_type_l),
-	.JOY_TYPE_R(kb_joy_type_r),
-	.JOY_L(joy_l),
-	.JOY_R(joy_r),
-	.JOY_RST(joy_rst),
-	
-	.KB_TYPE(1'b1),
-	.A (ppa1_a),	
-	
-	.JOY_DO(joy_bus),
-	.KB_DO(kbd_o),
-	.SHIFTS(kbd_shift)
-);
-
-//---------- Macros -------------------
-macros macros (.clk50(clk50),
-					.loading(loading),
-					.sym(symbol),
-					.macros_act(macros_act),
-					.enable(enable_autorun)
+karabas_keyboard keyboard(
+	.clk(clk50),
+	.areset(areset),
+	.osd_act(osd_act),
+	.hid_kb_status(hid_kb_status),
+	.hid_kb_dat0(hid_kb_dat0),
+	.hid_kb_dat1(hid_kb_dat1),
+	.hid_kb_dat2(hid_kb_dat2),
+	.hid_kb_dat3(hid_kb_dat3),
+	.hid_kb_dat4(hid_kb_dat4),
+	.hid_kb_dat5(hid_kb_dat5),
+	.joy_l(joy_l),
+	.joy_r(joy_r),
+	.ppa_pa(ppa1_a),
+	.loading(loading),
+	.loaded_done(loaded_done),
+	.enable_autorun(enable_autorun),
+	.kbd_cols(kbd_o),
+	.kbd_shift(kbd_shift),
+	.joy_rst(joy_rst)
 );
 
 //---------- Soft switches ------------

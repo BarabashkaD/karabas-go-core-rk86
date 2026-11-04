@@ -1,0 +1,4 @@
+verilog work "rtl/k580wm80a.v"
+verilog work "rtl/k580wt57.v"
+verilog work "rtl/k580wg75.v"
+verilog work "rtl/k580ww55.v"
