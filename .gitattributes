@@ -1,0 +1,3 @@
+# The ISE tools in the Linux VM read the checkout directly, also through a shared folder
+# from a Windows host: keep every file byte for byte as committed, whatever core.autocrlf is.
+* -text
