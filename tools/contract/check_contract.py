@@ -38,7 +38,7 @@ LITERAL = re.compile(r"\d*'[sS]?[bBoOdDhH]\s*[0-9a-fA-FxXzZ_?]+|\b\d+\b")
 IDENT = re.compile(r'\b[A-Za-z_][A-Za-z0-9_$]*\b')
 RANGE = re.compile(r'\[\s*(\d+)\s*:\s*(\d+)\s*\]')
 DECL = re.compile(r'(?<![\w.$])(input|output|inout|wire|reg|integer)\b([^;]*);')
-INST = re.compile(r'(?<![\w.$])([A-Za-z_]\w*)\s*(?:#\s*\((?:[^()]|\([^()]*\))*\)\s*)?([A-Za-z_]\w*)\s*\(')
+INST = re.compile(r'(?<![\w.$])([A-Za-z_]\w*)(?:\s*#\s*\((?:[^()]|\([^()]*\))*\)\s*|\s+)([A-Za-z_]\w*)\s*\(')
 
 
 def strip_comments(text):
@@ -301,6 +301,8 @@ def self_test():
         'assign imp3 = x;',
         'assign used_late = later;',
         'always @(*) begin if (x) q <= 8\'h00; end',
+        'always @(posedge clk) if (x) q <= 8\'h01;',
+        'always @(posedge clk) case (a) 4\'d0: q <= 8\'h02; endcase',
         'wire later;',
         'endmodule', ''])
     fd, path = tempfile.mkstemp(suffix='.v')
