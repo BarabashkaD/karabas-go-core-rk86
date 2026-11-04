@@ -8,13 +8,14 @@ source "$SETTINGS" > /dev/null
 
 cd "$(dirname "$0")"
 RTL=../rtl
+MODULES=../../modules
 OUT=build
 mkdir -p $OUT
 cd $OUT
 
 # the queue fifo is a Coregen netlist: use a behavioural VHDL model of it (synthesis keeps the core)
 vhpcomp -work work ../queue_sim.vhd
-vhpcomp -work work ../$RTL/spi/spi_slave.vhd ../$RTL/mcu/burst_rx.vhd ../$RTL/mcu/mcu.vhd ../tb_mcu_burst.vhd
+vhpcomp -work work ../$RTL/spi/spi_slave.vhd ../$MODULES/rtl/mcu/burst_rx.vhd ../$RTL/mcu/mcu.vhd ../tb_mcu_burst.vhd
 echo "run 2 ms; quit" > run.tcl
 
 # bursts at 16 MHz (BURST_MAX_MHZ 0) and at 32 MHz (BURST_MAX_MHZ 32, Mini G); classic frames stay at 16 MHz
