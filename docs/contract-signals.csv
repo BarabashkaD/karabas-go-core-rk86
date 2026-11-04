@@ -30,7 +30,7 @@ cpu_o,,y,y,y,machine,rk86_machine.cpu_do;platform,CPU data out; also memory writ
 cpu_rd,,y,y,y,machine,rk86_machine.cpu_rd;platform,SD reads on unqualified cpu_rd
 cpu_sync,,y,y,y,machine,internal:rk86_machine,machine internal
 cpu_wr_n,,y,y,y,machine,rk86_machine.cpu_wr_n;platform,also used by the board memory glue
-cpurst,,y,y,y,platform,platform,"reset composed in the board top (MCU reset, loader); feeds reset"
+cpurst,,y,y,y,platform,platform,"the OSD soft switch Reset (soft_switches); feeds the reset counter and the loader reset"
 crt_o,,y,y,y,machine,internal:rk86_machine,machine internal
 crt_rd_n,,y,y,y,machine,internal:rk86_machine,machine internal
 crt_we_n,,y,y,y,machine,internal:rk86_machine,machine internal
@@ -84,7 +84,7 @@ FT_CLK_OUT,,-,-,y,platform,platform,
 FT_DE,,-,y,y,platform,platform,
 FT_DISP,,-,y,-,platform,platform,
 FT_INT_N,,y,y,y,platform,platform,
-FT_OE_N,,y,y,-,platform,platform,
+FT_OE_N,,y,y,-,platform,platform,"Go: a port; Mini: assigned but not a port (implicit net)"
 FT_RESET,,-,y,-,platform,platform,
 FT_SPI_CS_N,,y,y,y,platform,platform,
 FT_SPI_MISO,,y,y,y,platform,platform,
@@ -145,7 +145,7 @@ osd_command,,y,y,y,platform,platform,
 ppa1_a,,y,y,y,machine,rk86_machine.ppa_pa;karabas_keyboard.ppa_pa,keyboard rows
 ppa1_b,,y,y,y,machine,internal:rk86_machine,machine internal
 ppa1_c,0,y,y,y,sound,rk86_machine.pc0;platform,sound and TAPE_OUT
-ppa1_c,7:1,y,y,y,machine,internal:rk86_machine,PC1..3 feed back to ipc
+ppa1_c,7:1,y,y,y,machine,internal:rk86_machine,PC1..PC3 feed back to ipc; PC4..PC7 outputs unused
 ppa1_o,,y,y,y,machine,internal:rk86_machine,machine internal
 ppa1_we_n,,y,y,y,machine,internal:rk86_machine,machine internal
 ppa2_we_n,,y,y,y,machine,rk86_machine.ext_we_n;platform,SD window write
