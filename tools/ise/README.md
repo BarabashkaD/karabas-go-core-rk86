@@ -2,13 +2,15 @@
 
 The core is built with Xilinx ISE 14.7 (XST) for the Spartan-6 XC6SLX25-FTG256-2, in a
 Linux virtual machine with ISE installed (for example the AMD/Xilinx ISE 14.7 VM image).
-One script builds one board from scratch in the working copy; `src/Makefile` runs the
-steps (`make -C src <board>-xst`, ... run the build up to that step; the earlier steps that
-are out of date run too):
+One script builds one or more boards from scratch in the working copy; `src/Makefile` runs
+the steps (`make -C src <board>-xst`, ... run the build up to that step; the earlier steps
+that are out of date run too):
 
 ```sh
-bash tools/ise/guest/build.sh go      # or mini, minig
+bash tools/ise/guest/build.sh go          # or mini, minig; several boards build in parallel: mini go minig
 ```
+
+`build.sh -k <board>...` keeps the Coregen cores of the previous build, which take most of the time of a build; make generates them again when their inputs change. A build for a commit or a release runs without `-k`.
 
 | Board | Configuration | Top | Constraints | Bitstream |
 | --- | --- | --- | --- | --- |
@@ -37,8 +39,11 @@ The shared Karabas Go library, karabas-go-modules, is a submodule of this reposi
 
 ## What a build does
 
-1. `build.sh` removes `build/ise/<board>/` and runs `make <board>` in `src/`.
-2. `regen_cores.sh` generates the Coregen cores of the `.prj`
+1. `build.sh` removes `build/ise/<board>/` and the cores stamp, runs `make cores` in `src/`
+   (the cores of all boards, once), then `make <board>` for the boards in parallel.
+2. `regen_cores.sh` generates the Coregen cores of the `.prj` files of all boards, each
+   core once; the cores of different directories run in parallel (`REGEN_JOBS` sets the
+   number of Coregen runs at a time, default the number of CPUs)
    (`ipcore_dir/<path>/<core>.v` from `src/ipcore/<path>/<core>.xco`). The inputs of each
    core, `<core>.xco` and `coregen.cgp`, are tracked in `src/ipcore/`; the generated cores
    go to `src/ipcore_dir/` (ignored). COE files are referenced relative to the `.xco`
@@ -48,11 +53,16 @@ The shared Karabas Go library, karabas-go-modules, is a submodule of this reposi
    the former ISE projects, so every output lands there and not next to the sources. The
    bitstream is copied to `src/<top>.bin`.
 
-Logs are in `build/logs/<board>/` (`make.log`, `coregen/*.log`), the reports in
-`build/ise/<board>/` (`make -C src <board>-report` prints the resources and the timing
-result), temporary files in `build/tmp/`. All of `build/` is ignored. The log locations and
-`build/tmp/` hold for `build.sh`; a direct `make` writes the Coregen logs to
-`build/logs/coregen/` and prints the tool output to the terminal.
+`make -C src -j3 go mini minig` builds the boards in parallel too (the cores are generated
+first, once). MAP and PAR stay single-threaded (`-mt off`), because multithreading changes
+the placement.
+
+Logs are in `build/logs/cores.log`, `build/logs/coregen/` (`*.log` per core) and
+`build/logs/<board>/make.log`, the reports in `build/ise/<board>/` (`make -C src
+<board>-report` prints the resources and the timing result), temporary files in
+`build/tmp/`. All of `build/` is ignored. The log locations and `build/tmp/` hold for
+`build.sh`; a direct `make` writes the Coregen logs to `build/logs/coregen/` and prints the
+tool output to the terminal.
 
 After a build `git status` is clean, unless the bitstream changed: `src/*.bin` are
 tracked, and a changed `.bin` is committed together with the change that caused it.
@@ -74,6 +84,15 @@ needed: XST, Coregen and NGDBuild run without one, MAP stops with `ERROR:Securit
 of the first network adapter in the image's `.ovf`; an import that generates new MAC
 addresses has to keep them (`VBoxManage import ... --options keepallmacs`) or the adapter
 MAC has to be set back to the `.ovf` value.
+
+Give the VM several CPUs (with the VM powered off: `VBoxManage modifyvm <vm> --cpus 4`;
+the I/O APIC must be on, as it is in the AMD image). Coregen then runs the cores of
+different directories in parallel (`REGEN_JOBS`, default: the number of CPUs), and
+`build.sh` builds several boards at the same time. MAP and PAR stay single-threaded
+(`-mt off`): their multi-threaded mode changes the placement and so the bitstream. With
+4 CPUs on a shared folder the three boards take about 10 minutes from scratch, one board
+about 8 minutes, and one board with `-k` about 4 minutes (one CPU and Coregen per board:
+about 20 minutes per board).
 
 ## From a host checkout through a shared folder
 
@@ -120,8 +139,10 @@ or PlanAhead) are in `build/ise/<board>/`.
 
 Builds of the same commit with the same ISE 14.7 profile give the same bitstream, byte
 for byte; the location of the checkout does not matter. The bitstreams built with the
-Makefile are byte-identical to those of the former `.xise` projects and to the committed
-release files. Reference SHA256 of the bitstreams of commit 10ff7fd:
+Makefile are byte-identical to those of the former `.xise` projects. The table is the
+SHA256 of the release bitstreams (commit 10ff7fd). A build of a commit that does not
+change the RTL reproduces them; a later RTL change changes them, and then the
+bitstreams of that commit are the new reference:
 
 | Board | SHA256 |
 | --- | --- |

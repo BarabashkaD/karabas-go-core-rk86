@@ -3,12 +3,13 @@
 # replaced). Runs in the ISE VM, see tools/ise/README.md.
 #
 #   make go|mini|minig     one board: cores, synthesis, implementation, src/<top>.bin
-#   make <board>-cores     the Coregen cores of the board: src/ipcore -> src/ipcore_dir
+#   make -j3 go mini minig the boards in parallel (the cores are generated first, once)
+#   make cores             the Coregen cores of all boards, once: src/ipcore -> src/ipcore_dir
 #   make <board>-config    the working copies of <top>.prj / .xst / .ut
 #   make <board>-xst       the build up to synthesis (.ngc); earlier steps that are out of date run too
 #   make <board>-report    LUTs, slices, block RAMs and the timing result of the last build
 #   make clean-<board>     the working directory of the board
-#   make clean             all working directories and the generated cores
+#   make clean             all working directories, the cores and the cores stamp
 #
 # Inputs per board: <top>.prj (the source list, paths relative to src/), <top>.xst (XST
 # options), the .ucf, <top>.ut (BitGen options); the cores of the .prj come from src/ipcore/.
@@ -49,24 +50,27 @@ COE := $(shell for x in $(wildcard ipcore/*.xco ipcore/*/*.xco); do \
 	case "$$c" in (""|no_*) ;; (*) echo $$(dirname $$x)/$$c ;; esac; done)
 CGP := $(wildcard ipcore/coregen.cgp ipcore/*/coregen.cgp)
 
-# The boards share src/ipcore_dir (and the Coregen logs), so they are built one after the other.
-.NOTPARALLEL:
-
-.PHONY: all clean $(BOARDS) $(BOARDS:=-cores) $(BOARDS:=-config) $(BOARDS:=-xst) \
+.PHONY: all clean cores $(BOARDS) $(BOARDS:=-config) $(BOARDS:=-xst) \
 	$(BOARDS:=-report) $(addprefix clean-,$(BOARDS))
 
 all: $(BOARDS)
 
+# The cores of all boards, generated once (the boards share src/ipcore_dir); after them the
+# boards build in parallel with make -j.
+XCO := $(wildcard ipcore/*.xco ipcore/*/*.xco)
+PRJ := $(foreach b,$(BOARDS),$(TOP_$(b)).prj)
+
+$(WORK)/cores.stamp: $(XCO) $(CGP) $(COE) $(PRJ)
+	mkdir -p $(WORK)
+	$(XIL) REGEN_LOG_DIR=$(REGEN_LOG_DIR) bash ../tools/ise/guest/regen_cores.sh $(PRJ)
+	touch $@
+
+cores: $(WORK)/cores.stamp
+
 # $(1) board, $(2) top module, $(3) working directory
 define board
 SRC_$(1) := $$(shell sed -n 's/^[a-z]* work "\(.*\)"/\1/p' $(2).prj)
-XCO_$(1) := $$(patsubst ipcore_dir/%.v,ipcore/%.xco,$$(filter ipcore_dir/%,$$(SRC_$(1))))
 SD_$(1) := $$(shell sed -n 's/^-sd {\(.*\)}/\1/p' $(2).xst | tr -d '"')
-
-$(3)/cores.stamp: $$(XCO_$(1)) $(CGP) $(COE)
-	mkdir -p $(3)
-	$(XIL) REGEN_LOG_DIR=$(REGEN_LOG_DIR) bash ../tools/ise/guest/regen_cores.sh $(2).prj
-	touch $$@
 
 $(3)/$(2).prj: $(2).prj
 	mkdir -p $(3)
@@ -80,7 +84,7 @@ $(3)/$(2).ut: $(2).ut
 	mkdir -p $(3)
 	cp $$< $$@
 
-$(3)/$(2).ngc: $(3)/$(2).prj $(3)/$(2).xst $(3)/cores.stamp $$(filter-out ipcore_dir/%,$$(SRC_$(1)))
+$(3)/$(2).ngc: $(3)/$(2).prj $(3)/$(2).xst $(WORK)/cores.stamp $$(filter-out ipcore_dir/%,$$(SRC_$(1)))
 	mkdir -p $(3)/xst/projnav.tmp
 	cd $(3) && $(XIL) xst -intstyle ise -ifn $(2).xst -ofn $(2).syr
 
@@ -95,7 +99,6 @@ $(2).bin: $(3)/$(2).bin
 	cp $$< $$@
 
 $(1): $(2).bin
-$(1)-cores: $(3)/cores.stamp
 $(1)-config: $(3)/$(2).prj $(3)/$(2).xst $(3)/$(2).ut
 $(1)-xst: $(3)/$(2).ngc
 $(1)-report:
@@ -108,4 +111,4 @@ endef
 $(foreach b,$(BOARDS),$(eval $(call board,$(b),$(TOP_$(b)),$(WORK)/$(b))))
 
 clean: $(addprefix clean-,$(BOARDS))
-	rm -rf ipcore_dir
+	rm -rf ipcore_dir $(WORK)/cores.stamp
