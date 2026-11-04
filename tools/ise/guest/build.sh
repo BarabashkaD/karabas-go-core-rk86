@@ -1,48 +1,73 @@
 #!/bin/bash
-# Builds one board from scratch in the working copy, inside the ISE 14.7 VM: a clone in
-# the VM or a host checkout mounted through a shared folder.
+# Builds one or more boards from scratch in the working copy, inside the ISE 14.7 VM: a
+# clone in the VM or a host checkout mounted through a shared folder.
 #
-# Usage: bash tools/ise/guest/build.sh <go|mini|minig>
+# Usage: bash tools/ise/guest/build.sh <go|mini|minig>...
 #
-# Removes the working directory of the board (build/ise/<board>/) and runs `make <board>`
-# in src/: the Coregen cores, XST, NGDBuild, MAP, PAR, TRCE, BitGen and the copy of the
-# bitstream to src/<top>.bin, which is tracked: commit it when it changes. For one step at
-# a time use src/Makefile directly.
-# Log: build/logs/<board>/make.log (Coregen: coregen/); temporary files: build/tmp/.
+# Removes the working directories of the boards (build/ise/<board>/) and the cores stamp,
+# runs `make cores` in src/ (the Coregen cores of all boards, once), then `make <board>`
+# for every board in parallel: XST, NGDBuild, MAP, PAR, TRCE, BitGen and the copy of the
+# bitstream to src/<top>.bin, which is tracked: commit it when it changes. For one step
+# at a time use src/Makefile directly.
+# Logs: build/logs/cores.log and build/logs/coregen/, build/logs/<board>/make.log;
+# temporary files: build/tmp/.
 #
 # Optional environment:
 #   ISE_SETTINGS  settings script of the ISE installation
 #                 (default /opt/Xilinx/14.7/ISE_DS/settings64.sh)
+#   REGEN_JOBS    Coregen runs at a time (default: the number of CPUs)
 
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
-case "${1:-}" in
-    go)    TOP=radio86rk ;;
-    mini)  TOP=radio86rk_mini ;;
-    minig) TOP=radio86rk_minig ;;
-    *)     echo "usage: build.sh go|mini|minig"; exit 2 ;;
-esac
+usage() { echo "usage: build.sh go|mini|minig..."; exit 2; }
+top() {
+    case "$1" in
+        go)    echo radio86rk ;;
+        mini)  echo radio86rk_mini ;;
+        minig) echo radio86rk_minig ;;
+    esac
+}
+[ $# -gt 0 ] || usage
+for b in "$@"; do [ -n "$(top "$b")" ] || usage; done
 export ISE_SETTINGS="${ISE_SETTINGS:-/opt/Xilinx/14.7/ISE_DS/settings64.sh}"
 [ -f "$ISE_SETTINGS" ] || { echo "ISE not found: $ISE_SETTINGS"; exit 91; }
 [ -f "$REPO/modules/rtl/mcu/burst_rx.vhd" ] \
     || { echo "modules/ is empty: run git submodule update --init"; exit 97; }
 
-LOG="$REPO/build/logs/$1"
-rm -rf "$REPO/build/ise/$1" "$LOG"
+LOG="$REPO/build/logs"
+for b in "$@"; do rm -rf "$REPO/build/ise/$b" "$LOG/$b"; done
+rm -rf "$REPO/build/ise/cores.stamp" "$LOG/coregen" "$LOG/cores.log"
 mkdir -p "$LOG" "$REPO/build/tmp" || exit 90
 export TMPDIR="$REPO/build/tmp" TMP="$REPO/build/tmp" TEMP="$REPO/build/tmp"
 export LANG=C LC_ALL=C
 
-touch "$LOG/started"
-echo "make $1"
-if ! make -C "$REPO/src" "$1" REGEN_LOG_DIR="$LOG/coregen" > "$LOG/make.log" 2>&1; then
-    echo "build failed, see $LOG/make.log"
+STARTED="$LOG/started"
+touch "$STARTED"
+echo "make cores"
+if ! make -C "$REPO/src" cores REGEN_LOG_DIR="$LOG/coregen" > "$LOG/cores.log" 2>&1; then
+    echo "Coregen failed, see $LOG/cores.log"
     exit 95
 fi
-if [ ! "$REPO/src/$TOP.bin" -nt "$LOG/started" ]; then
-    echo "no new src/$TOP.bin"
-    exit 96
-fi
-sha256sum "$REPO/src/$TOP.bin"
+
+jobs_=""
+for b in "$@"; do
+    mkdir -p "$LOG/$b" || exit 90
+    echo "make $b"
+    make -C "$REPO/src" "$b" > "$LOG/$b/make.log" 2>&1 &
+    jobs_="$jobs_ $b:$!"
+done
+rc=0
+for j in $jobs_; do
+    if ! wait "${j#*:}"; then
+        echo "build failed: ${j%%:*}, see $LOG/${j%%:*}/make.log"
+        rc=95
+    fi
+done
+[ $rc -eq 0 ] || exit $rc
+for b in "$@"; do
+    bin="$REPO/src/$(top "$b").bin"
+    [ "$bin" -nt "$STARTED" ] || { echo "no new src/$(top "$b").bin"; exit 96; }
+    sha256sum "$bin"
+done
