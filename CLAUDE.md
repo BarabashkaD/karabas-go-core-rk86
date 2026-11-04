@@ -20,7 +20,7 @@ The core is not converted to karabas-go-modules: it has no `modules/` submodule 
 
 - ISE GUI projects in `src/`: `Radio-86RK.xise` (Go, top `radio86rk`, `pins.ucf`), `Radio-86RK-mini.xise` (`radio86rk_mini`, `pins_mini.ucf`), `Radio-86RK-minig.xise` (`radio86rk_minig`, `pins_minig.ucf`). `Radio-86RK.tcl` is the exported ISE project script of the Go. There is no Makefile and no build script.
 - The bitstreams are `src/radio86rk.bin`, `radio86rk_mini.bin`, `radio86rk_minig.bin` (committed). The ISE outputs land in `src/` next to the sources; `.gitignore` covers most of them.
-- `src/make_core.py` is a symlink to `../../karabas-go-tools/make_core/make_core.py` (the tools repo checked out next to this one). It packs `src/core.json` (Go), `core_mini.json`, `core_minig.json` with the `.bin` and the ROMs into `radio86rk.kg1` / `kg2` / `kg3`. The committed release files are the ones at the repo root; `src/radio86rk.kg1` is an old copy (2024).
+- `src/make_core.py` is a symlink to `../../karabas-go-tools/make_core/make_core.py` (the tools repo checked out next to this one). It packs `src/core.json` (one file for all boards: the common keys, `boards` for what differs; kgo2, karabas-go-tools `docs/kgo2.md`) with the `.bin` and the ROMs into `src/radio86rk.kg` (`make_core.py core.json radio86rk.kg`, or `--boards <board>` for one board's bitstream), the release file.
 - Each release commit is per board: the `.bin`, the `.xise`, the `build` of the json and the root `.kg*` together.
 
 ## MCU link and core file
