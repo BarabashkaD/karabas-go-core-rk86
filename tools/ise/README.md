@@ -32,7 +32,7 @@ The bitstream itself needs only this repository; `karabas-go-tools` is needed fo
 `.kg` packaging.
 
 The shared Karabas Go library, karabas-go-modules, is a submodule of this repository
-(`modules/`, pinned to a commit); it is not used by the build yet. Clone with
+(`modules/`, pinned to a commit); the build takes five files from it (see the `.prj` lines `../modules/...`). Clone with
 `--recursive`, or run `git submodule update --init` in an existing clone.
 
 ## What a build does

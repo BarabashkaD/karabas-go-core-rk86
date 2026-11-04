@@ -26,6 +26,8 @@ case "${1:-}" in
 esac
 export ISE_SETTINGS="${ISE_SETTINGS:-/opt/Xilinx/14.7/ISE_DS/settings64.sh}"
 [ -f "$ISE_SETTINGS" ] || { echo "ISE not found: $ISE_SETTINGS"; exit 91; }
+[ -f "$REPO/modules/rtl/mcu/burst_rx.vhd" ] \
+    || { echo "modules/ is empty: run git submodule update --init"; exit 97; }
 
 LOG="$REPO/build/logs/$1"
 rm -rf "$REPO/build/ise/$1" "$LOG"
