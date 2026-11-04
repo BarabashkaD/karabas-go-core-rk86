@@ -75,9 +75,9 @@ The extraction must keep these facts. They are read from the current code.
 
 **CPU clock enable** (`src/radio86rk.v`)
 
-- The CPU clock enable is 1 of 28 cycles: `cpu_cnt` counts 0 to 27 (lines 440-441).
-- When `hldareg[10:9]` is `01` (about 10 cycles after `hlda` rises) and the CPU has a read or write active, the CPU gets one extra enable at once (line 438). This re-enable is safe while the `cce` period is greater than 11. The period is 18.
-- `hrq` is looped back to `hlda` (line 468: `.hlda(hlda), .hrq(hlda)`).
+- The CPU clock enable is 1 of 28 cycles: `cpu_cnt` counts 0 to 27 (lines 424-425).
+- When `hldareg[10:9]` is `01` (about 10 cycles after `hlda` rises) and the CPU has a read or write active, the CPU gets one extra enable at once (line 422). This re-enable is safe while the `cce` period is greater than 11. The period is 18.
+- `hrq` is looped back to `hlda` (line 452: `.hlda(hlda), .hrq(hlda)`).
 
 **Memory**
 
