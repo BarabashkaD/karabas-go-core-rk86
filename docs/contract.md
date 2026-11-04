@@ -147,4 +147,4 @@ A change that adds, removes or renames a signal in a top updates the CSV in the 
 
 Limit: the check compares names and widths only. A correctly named net on the wrong port is not caught. Review and the XST warning diff cover that.
 
-Lifetime: the CSV and the checker are removed after the boards are moved to the machine (PR08b).
+Lifetime: the CSV and the checker are removed after the boards are moved to the machine.

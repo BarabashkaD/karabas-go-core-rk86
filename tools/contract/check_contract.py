@@ -28,7 +28,14 @@ BOUNDARIES = {'machine', 'keyboard', 'video', 'sound', 'memory', 'platform'}
 FIELDS = ['signal', 'bits', 'go', 'mini', 'minig', 'boundary', 'target', 'note']
 # iverilog diagnostics on manifest files that ISE accepts (docs/contract.md); not fixed
 # in this series. Any other diagnostic fails the check.
-KNOWN_IVERILOG = {('k580wm80a.v', 47), ('k580wm80a.v', 49), ('k580ww55.v', 29)}
+# (file, line, a distinctive part of the message). The follow-up lines without file:line
+# (error count, "Elaboration failed") are accepted only when iverilog exits non-zero.
+KNOWN_IVERILOG = {('k580wm80a.v', 47, 'Unable to bind'),
+                  ('k580wm80a.v', 47, 'Unable to elaborate'),
+                  ('k580wm80a.v', 49, 'declared here'),
+                  ('k580ww55.v', 29, 'does not have any delay'),
+                  ('k580ww55.v', 29, 'runtime infinite loop')}
+IVERILOG_FOLLOWUP = re.compile(r'^\d+ error\(s\) during elaboration\.$|^Elaboration failed$')
 KEYWORDS = {'module', 'endmodule', 'input', 'output', 'inout', 'wire', 'reg', 'integer',
             'assign', 'always', 'begin', 'end', 'if', 'else', 'case', 'endcase', 'default',
             'posedge', 'negedge', 'or', 'and', 'not', 'signed', 'parameter', 'localparam',
@@ -268,19 +275,29 @@ def run_iverilog(errors, iverilog):
     for f in files:
         mod = os.path.splitext(os.path.basename(f))[0]
         cmd = [iverilog, '-g2005', '-o', os.devnull, '-s', mod] + [os.path.join(ROOT, s) for s in files]
-        res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        except OSError as e:
+            errors.append('iverilog cannot be started (%s): %s' % (iverilog, e))
+            return
         out = res.stdout + res.stderr
         if 'Unknown module type' in out:
             errors.append('iverilog %s: unknown module (a vendor primitive or core?)' % mod)
-        new = [l for l in out.splitlines()
-               if re.search(r'([\w.]+\.v):(\d+):', l)
-               and (os.path.basename(re.search(r'([\w.]+\.v):(\d+):', l).group(1)),
-                    int(re.search(r'([\w.]+\.v):(\d+):', l).group(2))) not in KNOWN_IVERILOG]
-        for l in new:
-            errors.append('iverilog %s: %s' % (mod, l.strip()))
+        diag = 0
+        for l in out.splitlines():
+            m = re.search(r'([\w.]+\.v):(\d+):', l)
+            if m:
+                diag += 1
+                key = os.path.basename(m.group(1)), int(m.group(2))
+                if not any(key == k[:2] and k[2] in l for k in KNOWN_IVERILOG):
+                    errors.append('iverilog %s: %s' % (mod, l.strip()))
+            elif res.returncode and l.strip() and not IVERILOG_FOLLOWUP.match(l.strip()):
+                errors.append('iverilog %s: unexpected output: %s' % (mod, l.strip()))
+        if res.returncode and not diag:
+            errors.append('iverilog %s: exit %d without a file:line diagnostic: %s'
+                          % (mod, res.returncode, out.strip()[:200]))
         print('iverilog %s: exit %d%s' % (mod, res.returncode,
-              ', known findings only' if res.returncode and not new else ''))
-
+              ', known findings only' if res.returncode and diag else ''))
 
 def draft():
     names, _ = load_tops()
