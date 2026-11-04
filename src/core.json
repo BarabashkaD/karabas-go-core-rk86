@@ -2,28 +2,32 @@
     "id": "rk86",
     "name": "Radio-86RK",
     "build": "26101500",
-    "bitstream": "radio86rk.bin",
     "visible": true,
     "type": "osd",
     "order": 8,
     "eeprom_bank": 6,
     "roms": [
-        {"filename": "roms/BIOSSD.BIN", "address": 65536},
-        {"filename": "roms/BIOS.BIN", "address": 69632}
+    {"filename": "roms/BIOSSD.BIN", "address": 65536},
+    {"filename": "roms/BIOS.BIN", "address": 69632}
     ],
+    "boards": {
+        "go": {"bitstream": "radio86rk.bin"},
+        "mini": {"bitstream": "radio86rk_mini.bin"},
+        "minig": {"bitstream": "radio86rk_minig.bin"}
+    },
     "osd": [
-        {"type": "P", "name": "Please choose a tape image to"},
-        {"type": "P", "name": "load into the the RAM"},
-        {"type": "FL", "name": "Tape image", "slot": 1, "extensions": ".rkr,.rk,.gam", "hotkey": "Menu+T"},
-        {"type": "P", "name": ""},
-        {"type": "S", "name": "Text color", "options": ["White","Green"], "default": 0, "hotkey": "Menu+V"},
-        {"type": "S", "name": "Sound", "options": ["off","on"], "default": 1, "hotkey": "Menu+M"},
-        {"type": "S", "name": "ROM", "options": ["BIOSSD","BIOS"], "default": 0, "hotkey": "Menu+B"},
-        {"type": "P", "name": ""},
-        {"type": "P", "name": "Enable autorun to autostart"},
-        {"type": "P", "name": "a tape image after loading"},
-        {"type": "S", "name": "Autorun", "options": ["off","on"], "default": 1, "hotkey": "Menu+A"},
-        {"type": "P", "name": ""},
-        {"type": "T", "name": "Reset", "options": null, "default": 0, "hotkey": "Ctrl+Alt+Del"}
+    {"type": "P", "name": "Please choose a tape image to"},
+    {"type": "P", "name": "load into the the RAM"},
+    {"type": "FL", "name": "Tape image", "slot": 1, "extensions": ".rkr,.rk,.gam", "hotkey": "Menu+T"},
+    {"type": "P", "name": ""},
+    {"type": "S", "name": "Text color", "options": ["White", "Green"], "default": 0, "hotkey": "Menu+V"},
+    {"type": "S", "name": "Sound", "options": ["off", "on"], "default": 1, "hotkey": "Menu+M"},
+    {"type": "S", "name": "ROM", "options": ["BIOSSD", "BIOS"], "default": 0, "hotkey": "Menu+B"},
+    {"type": "P", "name": ""},
+    {"type": "P", "name": "Enable autorun to autostart"},
+    {"type": "P", "name": "a tape image after loading"},
+    {"type": "S", "name": "Autorun", "options": ["off", "on"], "default": 1, "hotkey": "Menu+A"},
+    {"type": "P", "name": ""},
+    {"type": "T", "name": "Reset", "options": null, "default": 0, "hotkey": "Ctrl+Alt+Del"}
     ]
 }
