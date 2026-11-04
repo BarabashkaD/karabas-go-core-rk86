@@ -2,17 +2,19 @@
 
 The core is built with Xilinx ISE 14.7 (XST) for the Spartan-6 XC6SLX25-FTG256-2, in a
 Linux virtual machine with ISE installed (for example the AMD/Xilinx ISE 14.7 VM image).
-One script builds one board in the working copy:
+One script builds one board from scratch in the working copy; `src/Makefile` runs the
+steps (`make -C src <board>-xst`, ... run the build up to that step; the earlier steps that
+are out of date run too):
 
 ```sh
 bash tools/ise/guest/build.sh go      # or mini, minig
 ```
 
-| Board | Project | Top | Constraints | Bitstream |
+| Board | Configuration | Top | Constraints | Bitstream |
 | --- | --- | --- | --- | --- |
-| `go` | `src/Radio-86RK.xise` | `radio86rk` | `src/pins.ucf` | `src/radio86rk.bin` |
-| `mini` | `src/Radio-86RK-mini.xise` | `radio86rk_mini` | `src/pins_mini.ucf` | `src/radio86rk_mini.bin` |
-| `minig` | `src/Radio-86RK-minig.xise` | `radio86rk_minig` | `src/pins_minig.ucf` | `src/radio86rk_minig.bin` |
+| `go` | `src/radio86rk.prj` / `.xst` / `.ut` | `radio86rk` | `src/pins.ucf` | `src/radio86rk.bin` |
+| `mini` | `src/radio86rk_mini.prj` / `.xst` / `.ut` | `radio86rk_mini` | `src/pins_mini.ucf` | `src/radio86rk_mini.bin` |
+| `minig` | `src/radio86rk_minig.prj` / `.xst` / `.ut` | `radio86rk_minig` | `src/pins_minig.ucf` | `src/radio86rk_minig.bin` |
 
 ## Repositories side by side
 
@@ -31,17 +33,22 @@ The bitstream itself needs only this repository; `karabas-go-tools` is needed fo
 
 ## What a build does
 
-1. `regen_cores.sh` generates every Coregen core of the project. The inputs of each core,
-   `<core>.xco` and `coregen.cgp`, are tracked in `src/ipcore/`; the generated cores go to
-   `src/ipcore_dir/` (ignored), the paths the `.xise` refers to. COE files are referenced
-   relative to the `.xco` (`src/roms/FONT.coe`, `src/rtl/osd/osd_font.coe`).
-2. `xtclsh` runs "Generate Programming File" with `rerun_all` on the unchanged project:
-   XST, Translate, Map, Place & Route, TRCE, BitGen. The project's Working Directory is
-   `build/ise/<board>/`, so every ISE output lands there and not next to the sources.
-3. The bitstream is copied to `src/<top>.bin`.
+1. `build.sh` removes `build/ise/<board>/` and runs `make <board>` in `src/`.
+2. `regen_cores.sh` generates the Coregen cores of the `.prj`
+   (`ipcore_dir/<path>/<core>.v` from `src/ipcore/<path>/<core>.xco`). The inputs of each
+   core, `<core>.xco` and `coregen.cgp`, are tracked in `src/ipcore/`; the generated cores
+   go to `src/ipcore_dir/` (ignored). COE files are referenced relative to the `.xco`
+   (`src/roms/FONT.coe`, `src/rtl/osd/osd_font.coe`).
+3. The Makefile copies the `.prj`, `.xst` and `.ut` to `build/ise/<board>/` with the paths
+   seen from there and runs XST, NGDBuild, MAP, PAR, TRCE and BitGen with the options of
+   the former ISE projects, so every output lands there and not next to the sources. The
+   bitstream is copied to `src/<top>.bin`.
 
-Logs are in `build/logs/<board>/` (`coregen/*.log`, `xtclsh.log`,
-`project_properties.txt`), temporary files in `build/tmp/`. All of `build/` is ignored.
+Logs are in `build/logs/<board>/` (`make.log`, `coregen/*.log`), the reports in
+`build/ise/<board>/` (`make -C src <board>-report` prints the resources and the timing
+result), temporary files in `build/tmp/`. All of `build/` is ignored. The log locations and
+`build/tmp/` hold for `build.sh`; a direct `make` writes the Coregen logs to
+`build/logs/coregen/` and prints the tool output to the terminal.
 
 After a build `git status` is clean, unless the bitstream changed: `src/*.bin` are
 tracked, and a changed `.bin` is committed together with the change that caused it.
@@ -55,8 +62,9 @@ cd karabas-go-core-rk86
 bash tools/ise/guest/build.sh go
 ```
 
-`build.sh` sources `/opt/Xilinx/14.7/ISE_DS/settings64.sh`; another installation is given
-with `ISE_SETTINGS=<path>/settings64.sh`. A license accepted by MAP for `xc6slx25` is
+The Makefile sources `ISE_SETTINGS` (default `/opt/Xilinx/14.7/ISE_DS/settings64.sh`)
+before every tool, and `build.sh` passes it through; another installation is given with
+`ISE_SETTINGS=<path>/settings64.sh`. A license accepted by MAP for `xc6slx25` is
 needed: XST, Coregen and NGDBuild run without one, MAP stops with `ERROR:Security:9c` /
 `ERROR:Map:258`. The license shipped in the AMD VM image is node-locked to the MAC address
 of the first network adapter in the image's `.ovf`; an import that generates new MAC
@@ -88,28 +96,28 @@ bash tools/ise/guest/build.sh go
 - A shared folder is slower than the guest disk: a build takes about 20 minutes on one
   virtual CPU.
 
-## In the ISE GUI
+## Changing the configuration
 
-```sh
-source /opt/Xilinx/14.7/ISE_DS/settings64.sh
-bash tools/ise/guest/regen_cores.sh src/Radio-86RK.xise   # generates the cores, creates build/ise/go
-ise &
-```
+There is no ISE project file. The reports and the routed design (`.ncd`, for FPGA Editor
+or PlanAhead) are in `build/ise/<board>/`.
 
-Open `src/Radio-86RK.xise` (or `-mini`, `-minig`), select the top module and run
-"Generate Programming File". The bitstream is written to `build/ise/<board>/`; copy it to
-`src/` (or build with `build.sh`, which does both). Decline project or core upgrades
-offered by ISE. Regenerate the cores with `regen_cores.sh`, not with "Regenerate Core"
-in the GUI: that process skips cores whose wrappers exist.
-
-To change a core, edit it in Coregen from `src/ipcore_dir/` and copy the changed `.xco`
-back to `src/ipcore/`, keeping the relative `coe_file` path.
+- A source file: add or remove its line in the `.prj` of every board that uses it, in the
+  order XST reads it (dependencies first).
+- An XST or BitGen option: edit the `.xst` / `.ut`. MAP and PAR options: `MAP_OPT` /
+  `PAR_OPT` in `src/Makefile`. A change of any of them is a new baseline, not a fix of a
+  mismatch.
+- A core: edit it in Coregen from `src/ipcore_dir/` and copy the changed `.xco` back to
+  `src/ipcore/`, keeping the relative `coe_file` path. A new core is a new
+  `verilog work "ipcore_dir/<path>/<core>.v"` line (its Verilog wrapper) in the `.prj`,
+  through which `regen_cores.sh` finds the core, and, if it has a netlist in its own
+  directory, an entry in `-sd` of the `.xst`.
 
 ## Reproducibility
 
 Builds of the same commit with the same ISE 14.7 profile give the same bitstream, byte
-for byte; the location of the checkout does not matter. Reference SHA256 of the
-bitstreams of commit 10ff7fd (equal to the committed release files):
+for byte; the location of the checkout does not matter. The bitstreams built with the
+Makefile are byte-identical to those of the former `.xise` projects and to the committed
+release files. Reference SHA256 of the bitstreams of commit 10ff7fd:
 
 | Board | SHA256 |
 | --- | --- |

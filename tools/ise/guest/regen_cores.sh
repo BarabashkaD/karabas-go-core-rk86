@@ -1,11 +1,11 @@
 #!/bin/bash
-# Generates every Coregen core of an ISE project from its tracked inputs.
+# Generates the Coregen cores of a board from their tracked inputs (called by src/Makefile).
 #
-# Usage: bash tools/ise/guest/regen_cores.sh src/<project>.xise
+# Usage: bash tools/ise/guest/regen_cores.sh src/<top>.prj
 #
+# The cores are the "ipcore_dir/<path>/<core>.v" entries of the .prj.
 # Inputs:  src/ipcore/<path>/<core>.xco and the coregen.cgp next to it (tracked).
-# Output:  src/ipcore_dir/<path>/ (ignored): the paths the .xise refers to; also creates
-#          the project's Working Directory.
+# Output:  src/ipcore_dir/<path>/ (ignored).
 # A coe_file in the tracked .xco is relative to the directory of that .xco; the
 # generated copy gets the absolute path, because Coregen reads it from there.
 #
@@ -17,24 +17,19 @@
 
 set -u
 
-XISE="$(readlink -f "${1:?project .xise}")"
-SRC="$(dirname "$XISE")"
+PRJ="$(readlink -f "${1:?board .prj}")"
+SRC="$(dirname "$PRJ")"
 LOG="${REGEN_LOG_DIR:-$SRC/../build/logs/coregen}"
 mkdir -p "$LOG" || exit 90
 command -v coregen > /dev/null || { echo "coregen not found: source settings64.sh first"; exit 91; }
 
-# ISE does not open a project whose Working Directory is missing (TclTasksC:project_150);
-# create it here, so that the project also opens in the GUI after this script.
-wd=$(sed -n 's/.*xil_pn:name="Working Directory" xil_pn:value="\([^"]*\)".*/\1/p' "$XISE")
-mkdir -p "$SRC/${wd:-.}" || exit 90
-
-cores=$(grep -o 'xil_pn:name="ipcore_dir/[^"]*\.xco"' "$XISE" | sed 's/^xil_pn:name="ipcore_dir\///; s/"$//')
-[ -n "$cores" ] || { echo "no Coregen cores in $XISE"; exit 92; }
+cores=$(sed -n 's/^[a-z]* work "ipcore_dir\/\(.*\)\.v"/\1/p' "$PRJ" | tr -d '\r')
+[ -n "$cores" ] || { echo "no Coregen cores in $PRJ"; exit 92; }
 
 for rel in $cores; do
     in="$SRC/ipcore/$(dirname "$rel")"
     out="$SRC/ipcore_dir/$(dirname "$rel")"
-    name=$(basename "$rel" .xco)
+    name=$(basename "$rel")
     if [ ! -f "$in/$name.xco" ] || [ ! -f "$in/coregen.cgp" ]; then
         echo "missing input for $rel: $in/$name.xco and $in/coregen.cgp"
         exit 92
@@ -58,5 +53,5 @@ for rel in $cores; do
         echo "coregen failed for $rel (rc=$rc), see $LOG/$name.log"
         exit 94
     fi
-    echo "coregen ok: $rel"
+    echo "coregen ok: $rel.xco"
 done

@@ -1,10 +1,6 @@
 # Build workspace: ISE working directories (build/ise/<board>), logs, temporary files.
-# The bitstreams src/*.bin are tracked: tools/ise/guest/build.sh copies them there.
+# The bitstreams src/*.bin are tracked: the build (src/Makefile) copies them there.
 /build/
 
 # Generated Coregen cores; their inputs are in src/ipcore/ (tools/ise/guest/regen_cores.sh)
 /src/ipcore_dir/
-
-# ISE messages and Project Navigator state next to the project files
-/src/_xmsgs/
-/src/iseconfig/

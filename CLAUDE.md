@@ -18,12 +18,12 @@ The core is not converted to karabas-go-modules: it has no `modules/` submodule 
 
 ## Build
 
-- ISE GUI projects in `src/`: `Radio-86RK.xise` (Go, top `radio86rk`, `pins.ucf`), `Radio-86RK-mini.xise` (`radio86rk_mini`, `pins_mini.ucf`), `Radio-86RK-minig.xise` (`radio86rk_minig`, `pins_minig.ucf`).
-- `bash tools/ise/guest/build.sh go|mini|minig` builds one board in the ISE 14.7 VM, in a clone or in a host checkout on a shared folder: `regen_cores.sh` generates the cores from `src/ipcore`, `xtclsh` runs "Generate Programming File" with `rerun_all`, the bitstream is copied to `src/`. `tools/ise/README.md`: VM, shared folder, GUI, license, reference hashes.
-- The Working Directory of the projects is `build/ise/<board>`: the ISE outputs land there, logs in `build/logs/<board>`; `build/` is ignored. `.gitignore` lists folders only.
+- Board configuration in `src/`: `radio86rk.prj` / `.xst` / `.ut` (Go, `pins.ucf`), `radio86rk_mini.*` (`pins_mini.ucf`), `radio86rk_minig.*` (`pins_minig.ucf`): the source list (paths relative to `src/`), the XST and the BitGen options; MAP / PAR options in `src/Makefile`. No `.xise` projects.
+- `bash tools/ise/guest/build.sh go|mini|minig` builds one board from scratch in the ISE 14.7 VM, in a clone or in a host checkout on a shared folder: it removes `build/ise/<board>` and runs `make <board>` in `src/` (Coregen cores from `src/ipcore` via `regen_cores.sh`, XST, NGDBuild, MAP, PAR, TRCE, BitGen, copy to `src/<top>.bin`). `make -C src <board>-xst|-report|...` runs the build up to that step (the earlier steps that are out of date run too). `tools/ise/README.md`: VM, shared folder, license, reference hashes.
+- The tools run in `build/ise/<board>` (the working directory of the tools): the ISE outputs land there, logs in `build/logs/<board>`; `build/` is ignored. `.gitignore` lists folders only.
 - The bitstreams are `src/radio86rk.bin`, `radio86rk_mini.bin`, `radio86rk_minig.bin` (committed); a build that changes one leaves it modified for the commit.
 - `src/make_core.py` is a symlink to `../../karabas-go-tools/make_core/make_core.py` (the tools repo checked out next to this one). It packs `src/core.json` (one file for all boards: the common keys, `boards` for what differs; kgo2, karabas-go-tools `docs/kgo2.md`) with the `.bin` and the ROMs into `src/radio86rk.kg` (`make_core.py core.json radio86rk.kg`, or `--boards <board>` for one board's bitstream), the release file.
-- Each release commit is per board: the `.bin`, the `.xise`, the `build` of the json and the root `.kg*` together.
+- Each release commit is per board: the `.bin`, the `build` of the json and the root `.kg*` together.
 
 ## MCU link and core file
 
