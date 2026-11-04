@@ -2,13 +2,17 @@
 # Builds one or more boards from scratch in the working copy, inside the ISE 14.7 VM: a
 # clone in the VM or a host checkout mounted through a shared folder.
 #
-# Usage: bash tools/ise/guest/build.sh <go|mini|minig>...
+# Usage: bash tools/ise/guest/build.sh [-k] <go|mini|minig>...
 #
-# Removes the working directories of the boards (build/ise/<board>/) and the cores stamp,
-# runs `make cores` in src/ (the Coregen cores of all boards, once), then `make <board>`
-# for every board in parallel: XST, NGDBuild, MAP, PAR, TRCE, BitGen and the copy of the
-# bitstream to src/<top>.bin, which is tracked: commit it when it changes. For one step
-# at a time use src/Makefile directly.
+#   -k  keep the Coregen cores of the previous build: make generates them again only
+#       when their inputs changed (for iterations; verification and releases build
+#       without -k)
+#
+# Removes the working directories of the boards (build/ise/<board>/) and, without -k, the
+# cores stamp, runs `make cores` in src/ (the Coregen cores of all boards, once), then
+# `make <board>` for every board in parallel: XST, NGDBuild, MAP, PAR, TRCE, BitGen and
+# the copy of the bitstream to src/<top>.bin, which is tracked: commit it when it changes.
+# For one step at a time use src/Makefile directly.
 # Logs: build/logs/cores.log and build/logs/coregen/, build/logs/<board>/make.log;
 # temporary files: build/tmp/.
 #
@@ -21,7 +25,7 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
-usage() { echo "usage: build.sh go|mini|minig..."; exit 2; }
+usage() { echo "usage: build.sh [-k] go|mini|minig..."; exit 2; }
 top() {
     case "$1" in
         go)    echo radio86rk ;;
@@ -29,6 +33,8 @@ top() {
         minig) echo radio86rk_minig ;;
     esac
 }
+KEEP_CORES=0
+if [ "${1:-}" = "-k" ]; then KEEP_CORES=1; shift; fi
 [ $# -gt 0 ] || usage
 for b in "$@"; do [ -n "$(top "$b")" ] || usage; done
 export ISE_SETTINGS="${ISE_SETTINGS:-/opt/Xilinx/14.7/ISE_DS/settings64.sh}"
@@ -38,7 +44,11 @@ export ISE_SETTINGS="${ISE_SETTINGS:-/opt/Xilinx/14.7/ISE_DS/settings64.sh}"
 
 LOG="$REPO/build/logs"
 for b in "$@"; do rm -rf "$REPO/build/ise/$b" "$LOG/$b"; done
-rm -rf "$REPO/build/ise/cores.stamp" "$LOG/coregen" "$LOG/cores.log"
+rm -f "$LOG/cores.log"
+# Without -k, or when the generated cores are missing, Coregen runs again from scratch.
+if [ $KEEP_CORES -eq 0 ] || [ ! -d "$REPO/src/ipcore_dir" ]; then
+    rm -rf "$REPO/build/ise/cores.stamp" "$LOG/coregen"
+fi
 mkdir -p "$LOG" "$REPO/build/tmp" || exit 90
 export TMPDIR="$REPO/build/tmp" TMP="$REPO/build/tmp" TEMP="$REPO/build/tmp"
 export LANG=C LC_ALL=C

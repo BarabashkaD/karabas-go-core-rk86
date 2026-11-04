@@ -10,6 +10,8 @@ that are out of date run too):
 bash tools/ise/guest/build.sh go          # or mini, minig; several boards build in parallel: mini go minig
 ```
 
+`build.sh -k <board>...` keeps the Coregen cores of the previous build, which take most of the time of a build; make generates them again when their inputs change. A build for a commit or a release runs without `-k`.
+
 | Board | Configuration | Top | Constraints | Bitstream |
 | --- | --- | --- | --- | --- |
 | `go` | `src/radio86rk.prj` / `.xst` / `.ut` | `radio86rk` | `src/pins.ucf` | `src/radio86rk.bin` |
