@@ -9,7 +9,7 @@
 #   make <board>-xst       the build up to synthesis (.ngc); earlier steps that are out of date run too
 #   make <board>-report    LUTs, slices, block RAMs and the timing result of the last build
 #   make clean-<board>     the working directory of the board
-#   make clean             all working directories and the generated cores
+#   make clean             all working directories, the cores and the cores stamp
 #
 # Inputs per board: <top>.prj (the source list, paths relative to src/), <top>.xst (XST
 # options), the .ucf, <top>.ut (BitGen options); the cores of the .prj come from src/ipcore/.
@@ -111,4 +111,4 @@ endef
 $(foreach b,$(BOARDS),$(eval $(call board,$(b),$(TOP_$(b)),$(WORK)/$(b))))
 
 clean: $(addprefix clean-,$(BOARDS))
-	rm -rf ipcore_dir
+	rm -rf ipcore_dir $(WORK)/cores.stamp

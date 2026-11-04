@@ -19,7 +19,11 @@
 # Optional environment:
 #   ISE_SETTINGS  settings script of the ISE installation
 #                 (default /opt/Xilinx/14.7/ISE_DS/settings64.sh)
-#   REGEN_JOBS    Coregen runs at a time (default: the number of CPUs)
+#   REGEN_JOBS    Coregen runs at a time (default: the number of CPUs; a value that is
+#                 not a positive integer counts as 1)
+#
+# A board listed twice is an error. Ctrl-C or SIGTERM stops the whole build: the trap ends
+# the process group of the script (make, the ISE tools and Coregen), exit status 130.
 
 set -u
 
@@ -48,7 +52,14 @@ remove() {
 KEEP_CORES=0
 if [ "${1:-}" = "-k" ]; then KEEP_CORES=1; shift; fi
 [ $# -gt 0 ] || usage
-for b in "$@"; do [ -n "$(top "$b")" ] || usage; done
+seen=" "
+for b in "$@"; do
+    [ -n "$(top "$b")" ] || usage
+    case "$seen" in (*" $b "*) echo "board listed twice: $b"; usage ;; esac
+    seen="$seen$b "
+done
+# Background jobs of a non-interactive bash ignore SIGINT: end the whole process group.
+trap 'trap "" TERM; kill -TERM 0 2> /dev/null; exit 130' INT TERM
 export ISE_SETTINGS="${ISE_SETTINGS:-/opt/Xilinx/14.7/ISE_DS/settings64.sh}"
 [ -f "$ISE_SETTINGS" ] || { echo "ISE not found: $ISE_SETTINGS"; exit 91; }
 [ -f "$REPO/modules/rtl/mcu/burst_rx.vhd" ] \
@@ -77,7 +88,8 @@ jobs_=""
 for b in "$@"; do
     mkdir -p "$LOG/$b" || exit 90
     echo "make $b"
-    make -C "$REPO/src" "$b" > "$LOG/$b/make.log" 2>&1 &
+    # -o: the board makes never remake the shared stamp (make cores did it)
+    make -C "$REPO/src" -o ../build/ise/cores.stamp "$b" >"$LOG/$b/make.log" 2>&1 &
     jobs_="$jobs_ $b:$!"
 done
 rc=0

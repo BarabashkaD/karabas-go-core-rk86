@@ -139,8 +139,10 @@ or PlanAhead) are in `build/ise/<board>/`.
 
 Builds of the same commit with the same ISE 14.7 profile give the same bitstream, byte
 for byte; the location of the checkout does not matter. The bitstreams built with the
-Makefile are byte-identical to those of the former `.xise` projects and to the committed
-release files. Reference SHA256 of the bitstreams of commit 10ff7fd:
+Makefile are byte-identical to those of the former `.xise` projects. The table is the
+SHA256 of the release bitstreams (commit 10ff7fd). A build of a commit that does not
+change the RTL reproduces them; a later RTL change changes them, and then the
+bitstreams of that commit are the new reference:
 
 | Board | SHA256 |
 | --- | --- |

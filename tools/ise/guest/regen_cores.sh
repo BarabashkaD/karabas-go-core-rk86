@@ -14,7 +14,10 @@
 #
 # Optional environment:
 #   REGEN_LOG_DIR  log directory (default <repo>/build/logs/coregen)
-#   REGEN_JOBS     Coregen runs at a time (default: the number of CPUs)
+#   REGEN_JOBS     Coregen runs at a time (default: the number of CPUs; a value that
+#                  is not a positive integer counts as 1)
+#
+# Ctrl-C or SIGTERM stops the Coregen runs too (the whole process group of the script).
 #
 # Exit codes: 0 ok, 90 file system, 91 coregen not found, 92 missing core or input,
 #             93 COE file not found, 94 coregen failed.
@@ -25,9 +28,15 @@ set -u
 SRC="$(dirname "$(readlink -f "$1")")"
 LOG="${REGEN_LOG_DIR:-$SRC/../build/logs/coregen}"
 JOBS="${REGEN_JOBS:-$(nproc 2> /dev/null || echo 1)}"
+case $JOBS in (''|*[!0-9]*|0) JOBS=1 ;; esac
+# Background jobs of a non-interactive bash ignore SIGINT: end the whole process group.
+trap 'trap "" TERM; kill -TERM 0 2> /dev/null; exit 130' INT TERM
 mkdir -p "$LOG" || exit 90
 command -v coregen > /dev/null || { echo "coregen not found: source settings64.sh first"; exit 91; }
 
+for prj in "$@"; do
+    [ -f "$prj" ] || { echo "missing board file: $prj"; exit 92; }
+done
 cores=$(for prj in "$@"; do
     sed -n 's/^[a-z]* work "ipcore_dir\/\(.*\)\.v"/\1/p' "$prj" | tr -d '\r'
 done | sort -u)
