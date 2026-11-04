@@ -4,45 +4,45 @@
 `default_nettype none
 
 module rk86_machine(
-	input         clk,
-	input         reset,     // composed by the board
+	input  wire        clk,
+	input  wire        reset,     // composed by the board
 	// timebase from the video (rk_video today): character clock enable, CRT sync inputs
-	input         cce,
-	input         hrtc,
-	input         vrtc,
+	input  wire        cce,
+	input  wire        hrtc,
+	input  wire        vrtc,
 	// CPU side of the memory bus
-	output [15:0] cpu_a,
-	output  [7:0] cpu_do,
-	output        cpu_rd,
-	output        cpu_wr_n,
-	output        rom,       // read from the ROM area: E000-FFFF, or 0000-7FFF while startup
-	output        startup,
+	output wire [15:0] cpu_a,
+	output wire  [7:0] cpu_do,
+	output wire        cpu_rd,
+	output wire        cpu_wr_n,
+	output wire        rom,       // read from the ROM area: E000-FFFF, or 0000-7FFF while startup
+	output wire        startup,
 	// DMA side of the memory bus (video)
-	output [15:0] vid_a,
-	output        vid_rd,
+	output wire [15:0] vid_a,
+	output wire        vid_rd,
 	// read data of the memory, to the CPU and to the CRT
-	input   [7:0] mem_di,
+	input  wire  [7:0] mem_di,
 	// keyboard: rows (PPI port A), columns (port B), special keys (PC7..PC5), tape (PC4)
-	output  [7:0] ppa_pa,
-	input   [7:0] kbd_cols,
-	input   [2:0] kbd_shift,
-	input         tape_in,
+	output wire  [7:0] ppa_pa,
+	input  wire  [7:0] kbd_cols,
+	input  wire  [2:0] kbd_shift,
+	input  wire        tape_in,
 	// sound and tape sources
-	output        pc0,
-	output        inte,
+	output wire        pc0,
+	output wire        inte,
 	// native video: the CRT outputs
-	output  [3:0] line,
-	output  [6:0] ochar,
-	output        lten,
-	output        vsp,
-	output        rvv,
-	output        hilight,
-	output  [1:0] lattr,
-	output  [1:0] gattr,
-	output        irq,
+	output wire  [3:0] line,
+	output wire  [6:0] ochar,
+	output wire        lten,
+	output wire        vsp,
+	output wire        rvv,
+	output wire        hilight,
+	output wire  [1:0] lattr,
+	output wire  [1:0] gattr,
+	output wire        irq,
 	// window A000-BFFF for a board device (the SD card on the Karabas boards)
-	output        ext_we_n,
-	input   [7:0] ext_di
+	output wire        ext_we_n,
+	input  wire  [7:0] ext_di
 );
 
 endmodule
