@@ -85,6 +85,15 @@ of the first network adapter in the image's `.ovf`; an import that generates new
 addresses has to keep them (`VBoxManage import ... --options keepallmacs`) or the adapter
 MAC has to be set back to the `.ovf` value.
 
+Give the VM several CPUs (with the VM powered off: `VBoxManage modifyvm <vm> --cpus 4`;
+the I/O APIC must be on, as it is in the AMD image). Coregen then runs the cores of
+different directories in parallel (`REGEN_JOBS`, default: the number of CPUs), and
+`build.sh` builds several boards at the same time. MAP and PAR stay single-threaded
+(`-mt off`): their multi-threaded mode changes the placement and so the bitstream. With
+4 CPUs on a shared folder the three boards take about 10 minutes from scratch, one board
+about 8 minutes, and one board with `-k` about 4 minutes (one CPU and Coregen per board:
+about 20 minutes per board).
+
 ## From a host checkout through a shared folder
 
 The sources can stay on the host (for example Windows) and be built in the VM: share

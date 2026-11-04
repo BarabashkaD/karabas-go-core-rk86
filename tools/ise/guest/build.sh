@@ -33,6 +33,18 @@ top() {
         minig) echo radio86rk_minig ;;
     esac
 }
+# Removes the given paths. On a shared folder an unlink can fail for a moment after a
+# build ("Text file busy"): try again, and stop if a path stays, so that a build never
+# starts on old outputs.
+remove() {
+    local i
+    for i in 1 2 3 4 5; do
+        rm -rf "$@" 2> /dev/null && return 0
+        sleep 2
+    done
+    rm -rf "$@" || { echo "cannot remove $*"; exit 90; }
+}
+
 KEEP_CORES=0
 if [ "${1:-}" = "-k" ]; then KEEP_CORES=1; shift; fi
 [ $# -gt 0 ] || usage
@@ -43,11 +55,11 @@ export ISE_SETTINGS="${ISE_SETTINGS:-/opt/Xilinx/14.7/ISE_DS/settings64.sh}"
     || { echo "modules/ is empty: run git submodule update --init"; exit 97; }
 
 LOG="$REPO/build/logs"
-for b in "$@"; do rm -rf "$REPO/build/ise/$b" "$LOG/$b"; done
-rm -f "$LOG/cores.log"
+for b in "$@"; do remove "$REPO/build/ise/$b" "$LOG/$b"; done
+remove "$LOG/cores.log"
 # Without -k, or when the generated cores are missing, Coregen runs again from scratch.
 if [ $KEEP_CORES -eq 0 ] || [ ! -d "$REPO/src/ipcore_dir" ]; then
-    rm -rf "$REPO/build/ise/cores.stamp" "$LOG/coregen"
+    remove "$REPO/build/ise/cores.stamp" "$LOG/coregen"
 fi
 mkdir -p "$LOG" "$REPO/build/tmp" || exit 90
 export TMPDIR="$REPO/build/tmp" TMP="$REPO/build/tmp" TEMP="$REPO/build/tmp"
