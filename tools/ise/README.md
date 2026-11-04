@@ -31,6 +31,10 @@ on the same level:
 The bitstream itself needs only this repository; `karabas-go-tools` is needed for the
 `.kg` packaging.
 
+The shared Karabas Go library, karabas-go-modules, is a submodule of this repository
+(`modules/`, pinned to a commit); it is not used by the build yet. Clone with
+`--recursive`, or run `git submodule update --init` in an existing clone.
+
 ## What a build does
 
 1. `build.sh` removes `build/ise/<board>/` and runs `make <board>` in `src/`.
@@ -56,7 +60,7 @@ tracked, and a changed `.bin` is committed together with the change that caused 
 ## In the VM
 
 ```sh
-git clone https://github.com/andykarpov/karabas-go-core-rk86
+git clone --recursive https://github.com/andykarpov/karabas-go-core-rk86
 git clone https://github.com/andykarpov/karabas-go-tools      # only for the .kg packaging
 cd karabas-go-core-rk86
 bash tools/ise/guest/build.sh go

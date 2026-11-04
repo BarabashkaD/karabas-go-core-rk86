@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The Radio-86RK (KR580VM80A, an i8080 clone) core for the Karabas Go, Mini and Mini G boards: Xilinx Spartan-6 XC6SLX25, ISE 14.7 (XST). The machine is the FPGA replica of Dmitry Tselikov (2011, modified BSD, `src/LICENSE.TXT`), ported to Aeon Lite, to ZX UNO by Andy Karpov (rk86-zxuno) and to the Karabas Go by Oleh Chastukhin (header of `src/radio86rk.v`).
 
-The core is not converted to karabas-go-modules: it has no `modules/` submodule and carries its own MCU link and OSD in `src/rtl/mcu` and `src/rtl/osd`.
+The core is not converted to karabas-go-modules yet: the library is the submodule `modules/`, but no file of it is in the build; the core carries its own MCU link and OSD in `src/rtl/mcu` and `src/rtl/osd`.
 
 ## Layout
 
@@ -14,6 +14,7 @@ The core is not converted to karabas-go-modules: it has no `modules/` submodule 
 - `src/rtl`: `k580wm80a.v` (CPU), `k580wt57.v` (DMA), `k580wg75.v` (CRT), `k580ww55.v` (PPI), `rk_video.v`, `rk_kbd.v`, `loader.v` (writes the ROMs and the tape image into the memory), `macros.v` (types the keys that start a loaded tape image), `mcu/` (`mcu.vhd`, `burst_rx.vhd`, `soft_switches.vhd`, `hid_parser.vhd`, `usb_ps2_lut.vhd`), `osd/`, `spi/`, `video/`, `dac/`, `adc/`.
 - `src/ipcore`: the inputs of the Coregen cores (`<core>.xco` + `coregen.cgp`: `pll`, `pllx5`, `queue`, `rambuffer`, `font`, `osd_vram`, `rom_font`); the generated cores go to `src/ipcore_dir` (ignored). COE paths in the `.xco` are relative to the `.xco`. `src/roms`: `BIOS.BIN`, `BIOSSD.BIN`, `FONT.BIN` with their `.coe`.
 - `pk/`: a set of tape images (`.RKR`, `.GAM`) for the SD card. `readme.txt`: the keys (older `WIN+` names; the json uses `Menu+`).
+- `modules/`: karabas-go-modules as a submodule (absolute HTTPS URL), pinned to a commit; it changes only by an explicit gitlink commit (`git -C modules checkout <sha>`, `git add modules`). Clone with `--recursive`, or `git submodule update --init` in an existing clone.
 - `src/sim`: `run_burst_sim.sh` (ISim, `tb_mcu_burst.vhd`: the link with bursts at 16 and 32 MHz; `queue_sim.vhd` is a behavioural model of the Coregen fifo).
 
 ## Build
