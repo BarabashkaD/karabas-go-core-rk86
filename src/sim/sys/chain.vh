@@ -176,8 +176,15 @@ endtask
 // rtc_send_all() again, [send_build_ids()], read_roms(): CMD_ROMLOADER 1, the ROM bursts, CMD_ROMLOADER 0;
 // the keyboard cleared (CMD_USB_KBD 0..6 = 0); CMD_INIT_DONE. docs/protocol.md section 3 puts the switches
 // and the RTC after the ROMs: the documentation and the code disagree; the TB follows the code.
-// Not sent: the OSD font (the OSD stays closed) and the build ids (CMD_HW_SETUP 10h-1Fh: no target in
-// mcu.vhd, which keeps only addresses 0 and 1).
+// Firmware frames NOT modelled (declared; the TB sends none of them):
+//  - the OSD font (configure()), so the OSD font RAM keeps its power-up contents;
+//  - the build ids (send_build_ids(), CMD_HW_SETUP 10h-1Fh: no target in mcu.vhd, which keeps only
+//    addresses 0 and 1);
+//  - the ROM popup traffic around read_roms(): osd_clear, osd_logo, osd_print, osd_update and
+//    osd_show_popup before the ROMs, osd_hide_popup and osd_handle after them.
+// Hence the OSD overlay path (overlay.vhd: OSD VRAM writes, popup, font upload, the OSD mixed into VGA)
+// is not exercised: the OSD stays closed for the whole chain and L0 / L1 say nothing about it. Together
+// with the switch / RTC order above this is the doc/code mismatch note of the start sequence.
 task prologue;
 	reg [8*8-1:0] s;
 	begin

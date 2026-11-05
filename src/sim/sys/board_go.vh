@@ -94,6 +94,11 @@ wire [23:0] vid_rgb = {VGA_R, VGA_G, VGA_B};
 // observed vector (L0, amendment A8): every output and inout pin of the top except the free-running
 // clocks V_CLK (the reference clock) and MIDI_CLK (counted below). MCU_MISO only while MCU_CS_N = 0
 // (otherwise it depends on unconnected mcu inputs, 'U' in RTL). Undriven inouts are Z.
+// The vector also holds TB stimulus: MCU_MOSI (the link data of mcu_link.v) and MCU_IO[1] (the burst chip
+// select) are driven by the TB, not by the DUT. A changed stimulus (e.g. other ROM bytes sent over the
+// link) therefore shows in L0 on MCU_MOSI before any DUT pin reacts; tools/compare_runs.py reports the
+// first differing pin and, separately, the first differing DUT output pin (it reads the next line).
+// L0 TB-DRIVEN: MCU_MOSI, MCU_IO[1]
 localparam integer OBS_W = 167;
 `define GO_OBS { \
 	MA, MD, MWR_N, MRD_N,                                                     /* 41 */ \
