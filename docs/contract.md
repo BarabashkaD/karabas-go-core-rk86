@@ -10,7 +10,7 @@ This document fixes the boundaries between a board-neutral machine, the Karabas 
 
 ## 2. Modules
 
-`karabas_keyboard` and `rk86_machine` have their bodies, moved from the three tops without changes; the tops instantiate them.
+`karabas_keyboard` and `rk86_machine` have their bodies, moved from the three tops without changes; the tops instantiate them. `rk86_video` has the native part of `rk_video`, moved without changes; `rk_video` instantiates it.
 
 ### `rk86_machine` (`src/rtl/rk86_machine.v`)
 
@@ -30,7 +30,7 @@ It contains the CPU `k580wm80a`, the DMA `k580wt57`, the CRT `k580wg75`, the PPI
 
 `rom` is high for a read from the ROM area: E000-FFFF, or 0000-7FFF while `startup` is set.
 
-The machine needs a timebase provider. It takes `cce`, `hrtc` and `vrtc` as inputs. Today `rk_video` provides them.
+The machine needs a timebase provider. It takes `cce`, `hrtc` and `vrtc` as inputs. Today `rk86_video` provides them (inside `rk_video` on the Karabas boards).
 
 ### `karabas_keyboard` (`src/rtl/karabas_keyboard.v`)
 
@@ -45,14 +45,39 @@ It contains the conversion of HID reports and joysticks from the MCU to the keyb
 | To the machine | `kbd_cols[7:0]`, `kbd_shift[2:0]` |
 | To the board | `joy_rst` |
 
+### `rk86_video` (`src/rtl/rk86_video.v`)
+
+It contains the native video of the Radio-86RK: the timebase of the CRT (`state`, `h_cnt`, `v_cnt`, `d_cnt`; `cce`, `hrtc`, `vrtc`) and the dot shift register of the glyph row (`data`, with `lten`, `vsp`, `rvv`). It has no board dependency and no vendor primitive: the font ROM is outside, on `font_addr` / `font_data`. The body is the one of `rk_video`, moved without changes; aliases give the ports the former names (`hr_wg75`, `vr_wg75`, `fdata`).
+
+| Group | Ports |
+|---|---|
+| Clock | `clk` |
+| From the CRT | `line[3:0]` (bits 2:0 used), `ichar[6:0]`, `vsp`, `lten`, `rvv` |
+| Timebase to the CRT | `cce`, `hrtc`, `vrtc` (combinational from the counters) |
+| Font ROM | `font_addr[9:0]` = `{ichar, line[2:0]}` (out, combinational), `font_data[7:0]` (in, bits 5:0 used): the ROM answers one `clk` later |
+| Native picture | `pix_ce` (`state == 0`, one `clk` of 3), `pix` (the dot, `data[5]`), `h_cnt[10:0]` (0 to 515), `v_cnt[10:0]` (0 to 619) |
+
+A board samples `pix`, `h_cnt` and `v_cnt` on the `clk` edge where `pix_ce` is high; all three change at that edge. `rk86_video` is not in `docs/contract-signals.csv`: it sits inside `rk_video`, and its ports are not signals of the tops.
+
+**Native timing and geometry**
+
+- `clk` on the Karabas boards is 40 MHz (the PLL output, historically named `clk50`; `src/ipcore/pll/pll.xco` has `clkout1_requested_out_freq=40`). The dot is `clk`/3 = 13.33 MHz. `cce` is `clk`/18 = 2.22 MHz. A line is 516 dots = 1548 `clk` = 38.7 us. A frame is 620 lines = 959 760 `clk`, about 24.0 ms (41.7 Hz). The moved comment "16MHz from 48MHz" stays as it was; these are the real values.
+- Decision: `rk86_video` and `rk86_machine` run from `clk` = 40 MHz, one dot per 3 cycles. The platform provides 40 MHz (the Pocket with its own PLL). There is no clock enable input and none is planned: it would change the clock of the whole machine.
+- `cce` goes to the CRT and the DMA, `hrtc` and `vrtc` to the CRT, all without a register.
+- `d_cnt == h_cnt mod 6`: both are cleared at the line end and advance under the same strobe. The glyph row is loaded when `d_cnt == 5`. The exact phase dot to character cell, with the latency of the ROM, is defined in PR10 (the dot stream, with simulation) and is not claimed here.
+- The line doubling is a property of the CRT, not of `rk86_video`: in both line modes the glyph row `line` comes from `chline[4:1]`, and `chline` advances on every falling edge of `hrtc` (`k580wg75.v:81, 117-131`), so each glyph row goes on two adjacent `v_cnt`.
+- The window `h_cnt` 60 to 467 (408 dots = 68 character cells), one line of two (`v_cnt_line`) and `v_cnt2 < 300` are a choice of the Karabas wrapper, not a native property. `v_cnt_line` is not reset at the end of the frame (only `v_cnt2` is) and does not toggle on the last line, so it toggles 619 times in a frame of 620 lines: the written lines are the even `v_cnt` in one frame and the odd ones in the next.
+- There is no reset: the initial values are the INIT = 0 of the FPGA. Every register of `rk86_video` (`state`, `d_cnt`, `data`, `h_cnt`, `v_cnt`) and of the wrapper (`v_cnt2`, `v_cnt_line`, `address_in`, `data_in`, ...) starts at 0; a cycle-exact simulation must set them to 0. No `initial` is added in PR09: XST would then infer `state` as an FSM (HDL ADVISOR in the `.syr`), and the names and the encoding would change.
+- Outputs such as `pix_de`, `line_end`, `frame_end` are added later (PR10) as new ports; the existing ports do not change.
+
 ### `src/rk86_machine.prj`
 
-The manifest lists the sources of the machine: `k580wm80a.v`, `k580wt57.v`, `k580wg75.v`, `k580ww55.v` and `rk86_machine.v`. Paths are relative to `src/`. The manifest is in no ISE project. The checker elaborates it with iverilog.
+The manifest lists the board-neutral sources: `k580wm80a.v`, `k580wt57.v`, `k580wg75.v`, `k580ww55.v`, `rk86_machine.v` and `rk86_video.v`. Paths are relative to `src/`. The manifest is in no ISE project. The checker elaborates it with iverilog.
 
 ## 3. What stays in the board top
 
 - Memory: the SRAM address and data mux with the priority loader, then video DMA, then CPU. The ROM is at `0x10000 + rom_sel * 0x1000`. The loader (`loader.v`) and the file loader stay here.
-- `rk_video`: it uses Xilinx-specific cores (`rambuffer`, Coregen `font`). It also generates the timebase and the output sync. The two parts are split later.
+- `rk_video` (`src/rtl/rk_video.v`, ports unchanged): the Karabas video around `rk86_video`. It holds the Coregen `font` ROM, the framebuffer `rambuffer` (408x300, one bit per dot) with its write (`h_cnt` 60 to 467, one line of two: `v_cnt2`, `v_cnt_line`), and the VGA output (`hvsync_generator`, 800x600, the reader with doubled dots and lines; `hr`, `vr`, `blank`, `pixel`).
 - PLL, MCU link, soft switches, OSD.
 - Reset composition: `cpurst | joy_rst` goes through a counter to `reset_n`. Then `reset = ~reset_n | loading`. `areset` is not part of the machine reset.
 - SD controller, sound mixing, video output, pin tie-offs.
@@ -61,17 +86,18 @@ The manifest lists the sources of the machine: `k580wm80a.v`, `k580wt57.v`, `k58
 
 The extraction must keep these facts. They are read from the current code.
 
-**Video timebase** (`src/rtl/rk_video.v`)
+**Video timebase** (`src/rtl/rk86_video.v`)
 
-- `hrtc` (`hr_wg75`) is low while `h_cnt` is 468 to 515 (line 66).
-- `vrtc` (`vr_wg75`) is low while `v_cnt` is 600 to 619 (line 67).
-- `cce = d_cnt == 0 && state == 2'b01` (line 68).
+- `hrtc` (`hr_wg75`) is low while `h_cnt` is 468 to 515 (line 52).
+- `vrtc` (`vr_wg75`) is low while `v_cnt` is 600 to 619 (line 53).
+- `cce = d_cnt == 0 && state == 2'b01` (line 54).
 - The period of `cce` is 18 `clk50` cycles. It is constant. It does not vary per line or in the blanking.
-  - `state` cycles 0, 1, 2 on every `clk50` edge (lines 78-82). One step takes 3 cycles.
-  - `h_cnt` and `d_cnt` advance only when `state == 0` (line 84).
-  - `d_cnt` counts 0 to 5 and wraps at `d_cnt + 1 == 6` (lines 122-125). One `d_cnt` period is 6 steps of 3 cycles.
-  - A line is `h_cnt` 0 to 515, that is 516 steps. 516 is a multiple of 6. The line end resets `d_cnt` to 0 (line 102) at the point where it wraps anyway. The period does not break at the line end.
+  - `state` cycles 0, 1, 2 on every `clk50` edge (lines 62-66). One step takes 3 cycles.
+  - `h_cnt` and `d_cnt` advance only when `state == 0` (line 68).
+  - `d_cnt` counts 0 to 5 and wraps at `d_cnt + 1 == 6` (lines 90-93). One `d_cnt` period is 6 steps of 3 cycles.
+  - A line is `h_cnt` 0 to 515, that is 516 steps. 516 is a multiple of 6. The line end resets `d_cnt` to 0 (line 78) at the point where it wraps anyway. The period does not break at the line end.
   - `cce` is high for one cycle (when `state == 1`) once per `d_cnt` period.
+- The font ROM has a latency of one `clk`: `font_addr` is combinational (line 56); the glyph row is loaded into `data` when `d_cnt == 5` (lines 70-71).
 
 **CPU clock enable** (`src/rtl/rk86_machine.v`)
 
@@ -90,7 +116,7 @@ The extraction must keep these facts. They are read from the current code.
 - Asynchronous reset in the CPU, the DMA, the PPI and the SD controller.
 - Synchronous reset in the CPU clock enable generator.
 - `loading` enters `reset` combinationally.
-- The CRT and `rk_video` have no reset.
+- The CRT, `rk86_video` and `rk_video` have no reset.
 
 ## 5. Keyboard
 

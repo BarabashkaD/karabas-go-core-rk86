@@ -65,9 +65,9 @@ SEGA joysticks (both ports):
 
 ## Architecture
 
-The machine is one board-neutral module; each board top connects it to the board. Another
-platform (for example the Analogue Pocket) uses the same machine with its own keyboard,
-memory and video output.
+The machine and its native video are board-neutral modules; each board top connects the
+machine to the board, and `rk_video` wraps the native video. Another platform (for example the Analogue Pocket) uses the same modules
+with its own keyboard, memory and video output.
 
 ```mermaid
 flowchart LR
@@ -75,12 +75,13 @@ flowchart LR
         mcu["mcu<br/>link to the board MCU"]
         kbd["karabas_keyboard<br/>USB HID and joysticks<br/>to the key matrix"]
         mem["memory<br/>SRAM, ROM select, loader"]
-        vid["rk_video<br/>timebase, font,<br/>framebuffer, VGA timing"]
+        vid["rk_video<br/>font ROM, framebuffer,<br/>VGA timing"]
         out["video output<br/>OSD, VGA or HDMI"]
         snd["sound<br/>DAC, HDMI audio"]
         sd["SD card"]
-        subgraph machine["rk86_machine: board-neutral"]
-            m["K580VM80A CPU<br/>K580VT57 DMA<br/>K580VG75 CRT<br/>K580VV55 PPI<br/>address decoding"]
+        subgraph neutral["board-neutral"]
+            m["rk86_machine<br/>K580VM80A CPU<br/>K580VT57 DMA<br/>K580VG75 CRT<br/>K580VV55 PPI<br/>address decoding"]
+            nv["rk86_video<br/>CRT timebase,<br/>dot shift register"]
         end
     end
     mcu -->|"HID reports, joysticks"| kbd
@@ -88,8 +89,9 @@ flowchart LR
     kbd -->|"columns, Shift/Ctrl keys"| m
     m -->|"rows"| kbd
     m <-->|"CPU and DMA bus"| mem
-    vid -->|"character clock,<br/>CRT sync"| m
-    m -->|"character, line,<br/>attributes"| vid
+    nv -->|"character clock,<br/>CRT sync"| m
+    m -->|"character, line,<br/>attributes"| nv
+    nv <-->|"glyph address and row,<br/>dots, dot counters"| vid
     vid --> out
     m -->|"PC0, INTE"| snd
     m <-->|"window A000-BFFF"| sd
@@ -100,11 +102,12 @@ flowchart LR
 | CPU, DMA, CRT, PPI, decoding | `rk86_machine` | the same | the same |
 | keyboard | rows, columns and `СС`/`УС`/`РУС/ЛАТ` of the PPI | `karabas_keyboard` | its own adapter |
 | memory, ROM, loading | the CPU and DMA bus | SRAM, the MCU loader | its own |
-| video | the CRT outputs; the timebase as inputs | `rk_video`, OSD, VGA or HDMI | its own output |
+| native video: CRT timebase, dots | `rk86_video` | the same | the same |
+| video output | the dots, the dot step and counters, the font ROM port of `rk86_video` | `rk_video` (font ROM, framebuffer, VGA timing), OSD, VGA or HDMI | its own output |
 | sound | PC0 and INTE | per-board mixing, DAC | its own |
 
 The boundaries, the signals that cross them and the invariants are in
-[docs/contract.md](docs/contract.md); `src/rk86_machine.prj` lists the machine sources.
+[docs/contract.md](docs/contract.md); `src/rk86_machine.prj` lists the board-neutral sources.
 
 ## License
 
