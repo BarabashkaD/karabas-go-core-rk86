@@ -1,12 +1,15 @@
 // The Radio-86RK machine without board dependencies: CPU, DMA, CRT, PPI, the address
 // decoding and the CPU clock enable (docs/contract.md). The code is the one of the board
-// tops, moved without changes; the board top composes the reset and owns the memory, the
-// video output and the device of the window A000-BFFF.
+// tops, moved; the clock enable ce of the whole machine and the CPU memory ready cpu_ready
+// are added around it (the Karabas tops tie both to 1). The board top composes the reset
+// and owns the memory, the video output and the device of the window A000-BFFF.
 `default_nettype none
 
 module rk86_machine(
 	input  wire        clk,
-	input  wire        reset,     // composed by the board
+	input  wire        ce,        // clock enable: the state advances only on clk edges with ce = 1
+	input  wire        reset,     // composed by the board; acts on every clk edge, whatever ce is
+	input  wire        cpu_ready, // the data for cpu_a is on mem_di / ext_di: 0 holds a pending CPU step
 	// timebase from the video (rk_video today): character clock enable, CRT sync inputs
 	input  wire        cce,
 	input  wire        hrtc,
@@ -49,7 +52,7 @@ module rk86_machine(
 // The names of the board tops, so that the code below is the moved code.
 wire clk50 = clk;
 wire[7:0] mem_o = mem_di;
-wire vid_cce = cce;
+wire vid_cce = cce & ce;
 wire vid_hr = hrtc;
 wire vid_vr = vrtc;
 wire[7:0] kbd_o = kbd_cols;
@@ -93,18 +96,37 @@ wire dma_we_n  = addrbus[15:13]!=3'b111|cpu_wr_n;
 reg[4:0] cpu_cnt;
 reg cpu_ce2;
 reg[10:0] hldareg;
-wire cpu_ce = cpu_ce2;
+// The CPU steps on a clk edge where its step is pending (cpu_ce2), the machine is enabled
+// (ce) and the memory has the data (cpu_ready). A pending step that meets cpu_ready = 0
+// waits: cpu_cnt and cpu_ce2 hold until it is taken.
+wire cpu_ce = cpu_ce2 & ce & cpu_ready;
 
 always @(posedge clk50) begin
-	if(reset) begin cpu_cnt<=0; cpu_ce2<=0; hldareg<=11'd0; end
-	else
-   if((hldareg[10:9] == 2'b01) && ((cpu_rd == 1) || (cpu_wr_n == 0))) begin cpu_cnt <= 0; cpu_ce2 <= 1; end
-	else
-	if(cpu_cnt < 27) begin cpu_cnt <= cpu_cnt + 5'd1; cpu_ce2 <= 0; end
-	else begin cpu_cnt <= 0; cpu_ce2 <= ~hlda; end
-	hldareg <= {hldareg[9:0],hlda};
-	startup <= reset|(startup&~addrbus[15]);
+	if(reset) begin cpu_cnt<=0; cpu_ce2<=0; end
+	else if(ce) begin
+		if(cpu_ce2 & ~cpu_ready) begin
+			// the pending CPU step waits for cpu_ready
+		end else
+		if((hldareg[10:9] == 2'b01) && ((cpu_rd == 1) || (cpu_wr_n == 0))) begin cpu_cnt <= 0; cpu_ce2 <= 1; end
+		else
+		if(cpu_cnt < 27) begin cpu_cnt <= cpu_cnt + 5'd1; cpu_ce2 <= 0; end
+		else begin cpu_cnt <= 0; cpu_ce2 <= ~hlda; end
+	end
+	if(ce) hldareg <= {hldareg[9:0],hlda};
+	if(reset|ce) startup <= reset|(startup&~addrbus[15]);
 end
+
+// The DMA and the CRT take a register write (rise of iwe_n) or a status read (rise of
+// ird_n) on the clk edge after the rise, whatever their ce is. Between two ce cycles these
+// inputs hold their value of the last ce cycle (*_q), so the rise is taken on a ce cycle,
+// as with ce = 1. The PPI writes on every clk while we_n is low: only on ce cycles.
+reg dma_we_q, crt_we_q, crt_rd_q;
+always @(posedge clk50)
+	if(ce) begin dma_we_q <= dma_we_n; crt_we_q <= crt_we_n; crt_rd_q <= crt_rd_n; end
+wire dma_we_ce = ce ? dma_we_n : dma_we_q;
+wire crt_we_ce = ce ? crt_we_n : crt_we_q;
+wire crt_rd_ce = ce ? crt_rd_n : crt_rd_q;
+wire ppa1_we_ce = ppa1_we_n | ~ce;
 
 k580wm80a CPU(.clk(clk50), .ce(cpu_ce), .reset(reset),
    .idata(cpu_i), .addr(addrbus), .sync(cpu_sync), .rd(cpu_rd), .wr_n(cpu_wr_n),
@@ -126,12 +148,12 @@ wire dma_owe_n,dma_ord_n,dma_oiowe_n,dma_oiord_n;
 assign vid_rd = ~dma_oiord_n;
 
 k580wt57 dma(.clk(clk50), .ce(vid_cce), .reset(reset),
-   .iaddr(addrbus[3:0]), .idata(cpu_o), .drq({1'b0,vid_drq,2'b00}), .iwe_n(dma_we_n), .ird_n(1'b1),
+   .iaddr(addrbus[3:0]), .idata(cpu_o), .drq({1'b0,vid_drq,2'b00}), .iwe_n(dma_we_ce), .ird_n(1'b1),
    .hlda(hlda), .hrq(hlda), .dack(dma_dack), .odata(dma_o), .oaddr(vid_addr),
    .owe_n(dma_owe_n), .ord_n(dma_ord_n), .oiowe_n(dma_oiowe_n), .oiord_n(dma_oiord_n) );
 
 k580wg75 crt(.clk(clk50), .ce(vid_cce),
-   .iaddr(addrbus[0]), .idata(cpu_o), .iwe_n(crt_we_n), .ird_n(crt_rd_n),
+   .iaddr(addrbus[0]), .idata(cpu_o), .iwe_n(crt_we_ce), .ird_n(crt_rd_ce),
    .vrtc(vid_vr), .hrtc(vid_hr), .dack(dma_dack[2]), .ichar(mem_o), .drq(vid_drq), .irq(vid_irq),
    .odata(crt_o), .line(vid_line), .ochar(vid_char), .lten(vid_lten), .vsp(vid_vsp),
    .rvv(vid_rvv), .hilight(vid_hilight), .lattr(vid_lattr), .gattr(vid_gattr) );
@@ -141,7 +163,7 @@ wire[7:0] ppa1_a;
 wire[7:0] ppa1_b;
 wire[7:0] ppa1_c;
 
-k580ww55 ppa1(.clk(clk50), .reset(reset), .addr(addrbus[1:0]), .we_n(ppa1_we_n),
+k580ww55 ppa1(.clk(clk50), .reset(reset), .addr(addrbus[1:0]), .we_n(ppa1_we_ce),
    .idata(cpu_o), .odata(ppa1_o), .ipa(ppa1_a), .opa(ppa1_a),
    .ipb(kbd_o), .opb(ppa1_b), .ipc({kbd_shift,TAPE_IN,ppa1_c[3:0]}), .opc(ppa1_c));
 

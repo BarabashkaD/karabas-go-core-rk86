@@ -436,9 +436,15 @@ always @(posedge clk50 or posedge reset) begin
 end
 
 //--------- MACHINE --------------
+// the machine runs on every clk50 edge, and the SRAM answers within the clk (docs/contract.md)
+wire machine_ce = 1'b1;
+wire cpu_ready = 1'b1;
+
 rk86_machine machine(
 	.clk(clk50),
+	.ce(machine_ce),
 	.reset(reset),
+	.cpu_ready(cpu_ready),
 	.cce(vid_cce),
 	.hrtc(vid_hr),
 	.vrtc(vid_vr),

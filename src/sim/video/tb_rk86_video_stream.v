@@ -9,14 +9,18 @@
 // FONT.BIN at the documented geometry, with the cursor (on in frame 2, off in frame 3:
 // both blink phases) and the attributes.
 // Plusarg +font=<path of FONT.BIN>; parameter FONT_LATENCY: clk from the edge where
-// font_addr changes to font_data (0: combinational); parameter FRAMES: frames to run.
+// font_addr changes to font_data (0: combinational); parameter FRAMES: frames to run;
+// parameter CE_MODE: the clock enable of rk86_video, 0 = always 1 (the Karabas boards),
+// 1 = 160 of 297 clk, 2 = pseudo-random, about 1 of 2 (SEED); the checks count ce cycles.
 `default_nettype none
 
 module tb_rk86_video_stream;
 
 parameter FONT_LATENCY = 1;          // the font core of rk_video: 1 (no output register)
 parameter FRAMES = 4;                // frames 0 to 3; the glyphs are checked on 2 and 3
-localparam FRAME_CLK = 959760;       // 620 lines x 516 dots x 3 clk
+parameter CE_MODE = 0;
+parameter SEED = 1;
+localparam FRAME_CE = 959760;        // 620 lines x 516 dots x 3 ce cycles
 localparam CUR_X = 11;               // the cursor: column 11, row 4 (BIOS coordinates)
 localparam CUR_Y = 4;
 localparam FRAME0 = 13;              // the frame counter of the CRT in frame 0: frame 2 has 15
@@ -27,6 +31,16 @@ localparam AQ = 40;                  // 80h (normal) at byte AQ + 1 of row AK
 
 reg clk = 1'b0;
 always #1 clk = ~clk;
+
+//--------- clock enable of rk86_video (as src/sim/machine/tb_rk86_machine.v) --------------
+reg [8:0] cadence = 9'd0;
+wire [9:0] cadence_sum = {1'b0, cadence} + 10'd160;
+reg [31:0] lfsr_ce = 32'h1234_5678 ^ SEED;
+wire ce = CE_MODE == 0 ? 1'b1 : CE_MODE == 1 ? cadence_sum >= 10'd297 : lfsr_ce[0];
+always @(posedge clk) begin
+	cadence <= cadence_sum >= 10'd297 ? cadence_sum - 10'd297 : cadence_sum[8:0];
+	lfsr_ce <= {lfsr_ce[30:0], lfsr_ce[31] ^ lfsr_ce[21] ^ lfsr_ce[1] ^ lfsr_ce[0]};
+end
 
 //--------- font ROM model --------------
 reg [7:0] font [0:1023];
@@ -145,7 +159,7 @@ wire pix_ce, pix;
 wire [10:0] h_cnt, v_cnt;
 wire s_ce, s_de, s_dot, s_hs, s_vs, s_ls, s_fs, s_le, s_fe;
 
-rk86_video vid(.clk(clk), .line(line), .ichar(ochar), .vsp(vsp), .lten(lten), .rvv(rvv),
+rk86_video vid(.clk(clk), .ce(ce), .line(line), .ichar(ochar), .vsp(vsp), .lten(lten), .rvv(rvv),
 	.cce(cce), .hrtc(hrtc), .vrtc(vrtc), .font_addr(font_addr), .font_data(font_data),
 	.pix_ce(pix_ce), .pix(pix), .h_cnt(h_cnt), .v_cnt(v_cnt));
 
@@ -157,11 +171,12 @@ rk86_video_stream st(.pix_ce(pix_ce), .pix(pix), .hrtc(hrtc), .vrtc(vrtc),
 //--------- checker state --------------
 integer errors = 0;
 integer n_clk = 0;                   // clk edges from the start
-integer gap = 0;                     // clk edges since the last ce
+integer n_ce = 0;                    // ce cycles from the start
+integer gap = 3;                     // ce cycles since the last pix_ce (3: the first one passes)
 integer h = 0;                       // the dot sampled at this ce: dot h of line v
 integer v = 0;
 integer frame = -1;                  // the frame of that dot, from the first frame start
-integer fs_clk = 0;                  // n_clk at the last frame start
+integer fs_ce = 0;                   // n_ce at the last frame start
 integer n_dot = 0, n_de = 0, n_hs = 0, n_vs = 0, n_ls = 0, n_le = 0, n_fe = 0;
 integer r_de = 0, r_hs = 0, r_vs = 0;        // rising edges of de, hs, vs
 // coverage guards of the reference (dots checked per frame, lit dots of the reference)
@@ -261,10 +276,10 @@ endtask
 
 task frame_done;
 begin
-	$display("frame %0d: clk %0d dots %0d de %0d hs %0d vs %0d line_start %0d line_end %0d frame_end %0d de_rise %0d hs_rise %0d vs_rise %0d glyph %0d spot %0d cursor %0d (%0s) reverse %0d lit %0d dut_lit %0d",
-		frame, n_clk - fs_clk, n_dot, n_de, n_hs, n_vs, n_ls, n_le, n_fe, r_de, r_hs, r_vs,
+	$display("frame %0d: ce %0d dots %0d de %0d hs %0d vs %0d line_start %0d line_end %0d frame_end %0d de_rise %0d hs_rise %0d vs_rise %0d glyph %0d spot %0d cursor %0d (%0s) reverse %0d lit %0d dut_lit %0d",
+		frame, n_ce - fs_ce, n_dot, n_de, n_hs, n_vs, n_ls, n_le, n_fe, r_de, r_hs, r_vs,
 		n_glyph, n_spot, n_cur, cur_on(frame) ? "on" : "off", n_rev, n_lit, n_dut);
-	if (n_clk - fs_clk != FRAME_CLK)
+	if (n_ce - fs_ce != FRAME_CE)
 		fail("frame length");
 	if (n_dot != 319920 || n_de != 280800 || n_hs != 29760 || n_vs != 10320 || n_ls != 620)
 		fail("dot counts of the frame");
@@ -478,7 +493,7 @@ initial begin
 	crt_wr(1'b0, CUR_X);
 	crt_wr(1'b0, CUR_Y);
 	dma_done = 1'b1;
-	$display("font latency %0d clk; DMA programmed at frame %0d, v_cnt %0d", FONT_LATENCY, frame, v_cnt);
+	$display("font latency %0d clk, CE_MODE %0d; DMA programmed at frame %0d, v_cnt %0d", FONT_LATENCY, CE_MODE, frame, v_cnt);
 end
 
 //--------- checker --------------
@@ -488,10 +503,14 @@ always @(posedge clk) if (!done) begin
 		fail("an output changed on an edge without pix_ce");
 	if (s_ce !== pix_ce)
 		fail("ce is not pix_ce");
+	if (s_ce === 1'b1 && !ce)
+		fail("pix_ce on a clk with ce = 0");
+	if (cce === 1'b1 && !ce)
+		fail("cce of rk86_video on a clk with ce = 0");
 	if (s_ce === 1'b1) begin
-		// the Karabas configuration: clk 40 MHz without a clock enable
+		// one dot per 3 ce cycles (3 clk on the Karabas boards: clk 40 MHz, ce = 1)
 		if (!first && gap != 3)
-			fail("the pix_ce period is not 3 clk");
+			fail("the pix_ce period is not 3 ce cycles");
 		gap = 0;
 		if (h == 0 && v == 0) begin
 			if (frame >= 0)
@@ -501,7 +520,7 @@ always @(posedge clk) if (!done) begin
 				finish_run;
 			if (frame == 2 && !dma_done)
 				fail("the DMA is not programmed before frame 2");
-			fs_clk = n_clk;
+			fs_ce = n_ce;
 			n_dot = 0; n_de = 0; n_hs = 0; n_vs = 0; n_ls = 0; n_le = 0; n_fe = 0;
 			r_de = 0; r_hs = 0; r_vs = 0;
 			n_glyph = 0; n_lit = 0; n_spot = 0; n_cur = 0; n_rev = 0; n_dut = 0; n_dut_nc = 0;
@@ -517,9 +536,12 @@ always @(posedge clk) if (!done) begin
 	end
 	prev_vec = vec;
 	prev_ce = s_ce;
-	gap = gap + 1;
+	if (ce) begin
+		gap = gap + 1;
+		n_ce = n_ce + 1;
+	end
 	first = 1'b0;
-	if (!done && n_clk > (FRAMES + 1) * FRAME_CLK) begin
+	if (!done && n_clk > 4 * (FRAMES + 1) * FRAME_CE) begin
 		fail("timeout");
 		finish_run;
 	end

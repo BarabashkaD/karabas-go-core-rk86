@@ -49,6 +49,7 @@ wire[7:0] font_data;
 
 rk86_video native(
 	.clk(clk),
+	.ce(1'b1),
 	.line(line),
 	.ichar(ichar),
 	.vsp(vsp),

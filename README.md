@@ -68,7 +68,7 @@ SEGA joysticks (both ports):
 The machine and its native video are board-neutral modules; each board top connects the
 machine to the board, and `rk_video` wraps the native video. Another platform (for example the Analogue Pocket) uses the same modules
 with its own keyboard, memory and video output; for the video, `rk86_video_stream` gives it the
-native dots with the visible area, the sync and the line and frame starts and ends.
+native dots with the visible area, the sync and the line and frame starts and ends. Both modules have a clock enable `ce`, and the machine a CPU memory ready `cpu_ready`: another platform runs them from its own clock and can make the CPU wait for a slower memory; the Karabas boards tie both to 1.
 
 ```mermaid
 flowchart LR
@@ -107,8 +107,9 @@ flowchart LR
 | Part | Board-neutral | Karabas boards | Another platform |
 | --- | --- | --- | --- |
 | CPU, DMA, CRT, PPI, decoding | `rk86_machine` | the same | the same |
+| clock | `ce` of `rk86_machine` and `rk86_video`: 40 million `ce` cycles per second on average | `clk` 40 MHz, `ce` = 1 | its own clock with a pattern of `ce` (e.g. 74.25 MHz, 160 of 297) |
 | keyboard | rows, columns and `СС`/`УС`/`РУС/ЛАТ` of the PPI | `karabas_keyboard` | its own adapter |
-| memory, ROM, loading | the CPU and DMA bus | SRAM, the MCU loader | its own |
+| memory, ROM, loading | the CPU and DMA bus, `cpu_ready` | SRAM (`cpu_ready` = 1), the MCU loader | its own (a slower memory makes the CPU wait with `cpu_ready`) |
 | native video: CRT timebase, dots | `rk86_video` | the same | the same |
 | video output | the dots, the dot step and counters, the font ROM port of `rk86_video` | `rk_video` (font ROM, framebuffer, VGA timing), OSD, VGA or HDMI | its own output |
 | native dot stream | `rk86_video_stream`: dot strobe, data enable, sync, line and frame start and end | not used | the input of its frame buffer |

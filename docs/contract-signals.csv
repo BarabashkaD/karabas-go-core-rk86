@@ -22,6 +22,7 @@ clk_hdmi,,-,y,y,video,platform,
 clk_hdmi_n,,-,y,y,video,platform,
 cpu_o,,y,y,y,machine,rk86_machine.cpu_do;platform,CPU data out; also memory write data and SD window in the top
 cpu_rd,,y,y,y,machine,rk86_machine.cpu_rd;platform,SD reads on unqualified cpu_rd
+cpu_ready,,y,y,y,memory,rk86_machine.cpu_ready,tied to 1: the SRAM answers within the clk
 cpu_wr_n,,y,y,y,machine,rk86_machine.cpu_wr_n;platform,also used by the board memory glue
 cpurst,,y,y,y,platform,platform,"the OSD soft switch Reset (soft_switches); feeds the reset counter and the loader reset"
 DAC_BCK,,y,-,y,sound,platform,per-board mixing differs
@@ -103,6 +104,7 @@ loader_ram_wr,,y,y,y,memory,platform,stays in the board top
 loading,,y,y,y,platform,karabas_keyboard.loading;platform,also used by the platform
 locked,,y,y,y,platform,platform,
 MA,,y,y,y,memory,platform,stays in the board top
+machine_ce,,y,y,y,platform,rk86_machine.ce,tied to 1: the machine runs on every clk50 edge (40 MHz)
 mcu_burst_ready,,y,y,y,platform,platform,
 MCU_CS_N,,y,y,y,platform,platform,
 MCU_IO,,y,y,y,platform,platform,
