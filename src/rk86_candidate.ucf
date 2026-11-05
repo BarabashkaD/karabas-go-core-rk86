@@ -1,0 +1,6 @@
+# The build candidate (docs/integration.md, The build candidate): only the clock pin is
+# placed: T8, the oscillator pin of the boards (50 MHz there); the candidate constrains it at
+# 25 ns to model the 40 MHz machine clock. The tools place the other pins, and no bitstream is
+# made.
+NET "clk" LOC = "T8" | IOSTANDARD = LVCMOS33 | TNM_NET = "clk";
+TIMESPEC "TS_clk" = PERIOD "clk" 25 ns HIGH 50%;

@@ -2,11 +2,11 @@
 
 ## 1. Why
 
-The core serves three Karabas boards: Go, Mini and Mini G. Other platforms may use the same machine later.
+The core serves three Karabas boards: Go, Mini and Mini G. Other platforms can use the same machine ([integration.md](integration.md)).
 
-Today each of the three tops repeats the same machine code: CPU, DMA, CRT, PPI, memory map, keyboard glue. A fix has to be made three times.
+Before this series each of the three tops repeated the same machine code: CPU, DMA, CRT, PPI, memory map, keyboard glue, and a fix had to be made three times. Now the tops instantiate the board-neutral machine and video and the Karabas keyboard (section 2).
 
-This document fixes the boundaries between a board-neutral machine, the Karabas keyboard and the board top. It lists the invariants that the extraction must keep. The skeletons and the check come first. The boards move to the machine in a later change.
+This document fixes the boundaries between the board-neutral machine, the Karabas keyboard and the board top, and lists the invariants that the extraction kept.
 
 ## 2. Modules
 
@@ -133,7 +133,7 @@ The native dot stream of `rk86_video` for a platform without the Karabas framebu
 
 ### `src/rk86_machine.prj`
 
-The manifest lists the board-neutral sources: `k580wm80a.v`, `k580wt57.v`, `k580wg75.v`, `k580ww55.v`, `rk86_machine.v`, `rk86_video.v` and `rk86_video_stream.v`. Paths are relative to `src/`. The manifest is in no ISE project. The checker elaborates it with iverilog.
+The manifest lists the board-neutral sources: `k580wm80a.v`, `k580wt57.v`, `k580wg75.v`, `k580ww55.v`, `rk86_machine.v`, `rk86_video.v` and `rk86_video_stream.v`. Paths are relative to `src/`. No board project uses it; the build candidate (`make -C src candidate`, [integration.md](integration.md), The build candidate) synthesizes its files with `src/rk86_candidate.v`, and the checker elaborates it with iverilog.
 
 ## 3. What stays in the board top
 

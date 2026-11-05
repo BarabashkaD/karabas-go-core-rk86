@@ -10,7 +10,7 @@ module rk86_machine(
 	input  wire        ce,        // clock enable: the state advances only on clk edges with ce = 1
 	input  wire        reset,     // composed by the board; acts on every clk edge, whatever ce is
 	input  wire        cpu_ready, // the data for cpu_a is on mem_di / ext_di: 0 holds a pending CPU step
-	// timebase from the video (rk_video today): character clock enable, CRT sync inputs
+	// timebase from rk86_video (inside rk_video on the Karabas boards): cce, CRT sync inputs
 	input  wire        cce,
 	input  wire        hrtc,
 	input  wire        vrtc,

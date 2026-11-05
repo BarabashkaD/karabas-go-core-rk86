@@ -117,6 +117,11 @@ flowchart LR
 
 The boundaries, the signals that cross them and the invariants are in
 [docs/contract.md](docs/contract.md); `src/rk86_machine.prj` lists the board-neutral sources.
+How another platform connects the modules (clock enable, reset, memory and `cpu_ready`,
+keyboard, sound, video) is in [docs/integration.md](docs/integration.md); `make -C src candidate`
+builds them on the XC6SLX25 with a clock enable pattern and a synchronous memory
+(`src/rk86_candidate.v`). How the boards were verified after the extraction, and what to test
+on them before a release: [docs/verification.md](docs/verification.md).
 
 ## License
 

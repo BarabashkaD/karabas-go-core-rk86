@@ -10,6 +10,9 @@
 #   make <board>-report    LUTs, slices, block RAMs and the timing result of the last build
 #   make clean-<board>     the working directory of the board
 #   make clean             all working directories, the cores and the cores stamp
+#   make candidate         the build candidate of the board-neutral modules (rk86_candidate.v):
+#                          synthesis and implementation, no bitstream (docs/integration.md)
+#   make candidate-report  its resources and its timing result
 #
 # Inputs per board: <top>.prj (the source list, paths relative to src/), <top>.xst (XST
 # options), the .ucf, <top>.ut (BitGen options); the cores of the .prj come from src/ipcore/.
@@ -51,7 +54,7 @@ COE := $(shell for x in $(wildcard ipcore/*.xco ipcore/*/*.xco); do \
 CGP := $(wildcard ipcore/coregen.cgp ipcore/*/coregen.cgp)
 
 .PHONY: all clean cores $(BOARDS) $(BOARDS:=-config) $(BOARDS:=-xst) \
-	$(BOARDS:=-report) $(addprefix clean-,$(BOARDS))
+	$(BOARDS:=-report) $(addprefix clean-,$(BOARDS)) candidate candidate-report clean-candidate
 
 all: $(BOARDS)
 
@@ -110,5 +113,45 @@ endef
 
 $(foreach b,$(BOARDS),$(eval $(call board,$(b),$(TOP_$(b)),$(WORK)/$(b))))
 
-clean: $(addprefix clean-,$(BOARDS))
+# The build candidate (docs/integration.md, The build candidate): rk86_candidate.v around the
+# sources of the manifest rk86_machine.prj, with rk86_candidate.xst and rk86_candidate.ucf (the
+# clk pin and its PERIOD). XST, NGDBuild, MAP, PAR and TRCE in $(WORK)/candidate; no bitstream,
+# no Coregen core; it does not depend on the board rules and they do not depend on it.
+CAND = rk86_candidate
+CAND_WORK = $(WORK)/candidate
+CAND_SRC := $(shell sed -n 's/^[a-z]* work "\(.*\)"/\1/p' rk86_machine.prj) $(CAND).v
+
+# The .prj: the manifest seen from the working directory, then the top; no pipe, so that a
+# failing step stops the rule, and the file appears only when it is complete and not empty.
+$(CAND_WORK)/$(CAND).prj: rk86_machine.prj
+	mkdir -p $(CAND_WORK)
+	sed 's#^\([a-z]*\) work "#\1 work "$(UP)/#' $< > $@.tmp
+	echo 'verilog work "$(UP)/$(CAND).v"' >> $@.tmp
+	test -s $@.tmp
+	mv $@.tmp $@
+	test -s $@
+
+$(CAND_WORK)/$(CAND).xst: $(CAND).xst
+	mkdir -p $(CAND_WORK)
+	cp $< $@
+
+$(CAND_WORK)/$(CAND).ngc: $(CAND_WORK)/$(CAND).prj $(CAND_WORK)/$(CAND).xst $(CAND_SRC)
+	mkdir -p $(CAND_WORK)/xst/projnav.tmp
+	cd $(CAND_WORK) && $(XIL) xst -intstyle ise -ifn $(CAND).xst -ofn $(CAND).syr
+
+$(CAND_WORK)/$(CAND).twr: $(CAND_WORK)/$(CAND).ngc $(CAND).ucf
+	cd $(CAND_WORK) && $(XIL) ngdbuild -intstyle ise -dd _ngo -nt timestamp -uc $(UP)/$(CAND).ucf -p $(PART) $(CAND).ngc $(CAND).ngd
+	cd $(CAND_WORK) && $(XIL) map -intstyle ise -p $(PART) -w $(MAP_OPT) -o $(CAND)_map.ncd $(CAND).ngd $(CAND).pcf
+	cd $(CAND_WORK) && $(XIL) par -w -intstyle ise $(PAR_OPT) $(CAND)_map.ncd $(CAND).ncd $(CAND).pcf
+	cd $(CAND_WORK) && $(XIL) trce -intstyle ise $(TRCE_OPT) -xml $(CAND).twx $(CAND).ncd -o $(CAND).twr $(CAND).pcf
+
+candidate: $(CAND_WORK)/$(CAND).twr
+candidate-report:
+	@grep -E "Number of (Slice Registers|Slice LUTs|occupied Slices|RAMB16BWERs|RAMB8BWERs|DSP48A1s):" $(CAND_WORK)/$(CAND)_map.mrp
+	@grep -E "constraints? (was|were) met|constraints? not met|Timing Score" $(CAND_WORK)/$(CAND).par | sort -u
+	@grep -E "Minimum period" $(CAND_WORK)/$(CAND).twr
+clean-candidate:
+	rm -rf $(CAND_WORK)
+
+clean: $(addprefix clean-,$(BOARDS)) clean-candidate
 	rm -rf ipcore_dir $(WORK)/cores.stamp

@@ -119,6 +119,16 @@ bash tools/ise/guest/build.sh go
 - A shared folder is slower than the guest disk: a build takes about 20 minutes on one
   virtual CPU.
 
+## The build candidate
+
+`make -C src candidate` synthesizes and implements `src/rk86_candidate.v`, the board-neutral
+modules with a clock enable pattern and a synchronous memory
+([docs/integration.md](../../docs/integration.md), The build candidate): XST, NGDBuild, MAP,
+PAR and TRCE in `build/ise/candidate/`, with the sources of `src/rk86_machine.prj`,
+`src/rk86_candidate.xst` and `src/rk86_candidate.ucf` (the clock pin and a PERIOD of 25 ns).
+There is no bitstream and no Coregen core, and the board rules do not depend on it.
+`make -C src candidate-report` prints its resources and its timing result.
+
 ## Changing the configuration
 
 There is no ISE project file. The reports and the routed design (`.ncd`, for FPGA Editor
