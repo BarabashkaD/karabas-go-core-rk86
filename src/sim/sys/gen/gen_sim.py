@@ -50,8 +50,19 @@ COREGEN_MEMS = ('rambuffer', 'font', 'osd_vram', 'rom_font')
 POWER_UP_SOURCE = ('power-up values and the X-check table come from build/ref/pr07-baseline (the netlists of '
                    'a9685c7), not from the F15/F23 path build/ref/machine-baseline (deviation from the plan text)')
 MACROS_SYM3 = ("macros SYMBOLS[3]: read at symbol_index 3 (out of range of [0:2]) at the last macro step: X in "
-               "RTL; XST: symbol bits 0,2,4,6,7 are constant 0 (pr07-baseline/go radio86rk.syr 1769-1773), bits "
-               "1,3,5 are not determined by the .syr -> 0; sim copy SYMBOLS[3] = 8'h00")
+               "RTL; the hardware value from the netlist build/ref/pr07-baseline/go/radio86rk_synth.v: symbol_5 D = "
+               "LUT2 INIT 4'hD on (symbol_index[0], symbol_index[1]) (cell keyboard/macros/"
+               "Mram_symbol_index[1]_X_23_o_wide_mux_8_OUT51) = 1 at index 3; symbol_3 D = XST_VCC "
+               "(FLASH_HOLD_N_OBUF_305) = 1; symbol_1 D = INV of symbol_index[1] (cell keyboard/macros/"
+               "Mram_symbol_index[1]_X_23_o_wide_mux_8_OUT111_INV_0) = 0; symbol_0,2,4,6,7 trimmed as constant 0 "
+               "(radio86rk.syr 1769-1773): XST clamps the index, SYMBOLS[3] = SYMBOLS[2] = 8'h28; sim copy "
+               "SYMBOLS[3] = 8'h28 (the same cells give 8'h2a, 8'h0A, 8'h28 at indices 0..2, the order of the sim copy)")
+# #9 declaration (F7c): what the parameter does and does not do in XilinxCoreLib BLK_MEM_GEN_V7_3.v
+COLL_DECL = ('C_SIM_COLLISION_CHECK("ALL") -> ("NONE"); in the behavioural model BLK_MEM_GEN_V7_3.v the parameter '
+             'is only declared (it matters for the structural unisim models): reads come from the memory array by '
+             'the write mode and are never forced to X by a collision. The warnings "blk_mem_gen_v7_3 collision '
+             'detected" come from the async_coll block (C_COMMON_CLK = 0, C_DISABLE_WARN_BHV_COLL = 0), print only, '
+             'and are kept: they mark reads whose data is undefined on the hardware (WRITE_FIRST on the other port)')
 # top nets wired to mcu outputs but declared reg (#2)
 MCU_OUT_REGS = ('fileloader_reset', 'fileloader_wr', 'fileloader_addr', 'loader_ram_a', 'fileloader_data',
                 'loader_ram_do')
@@ -242,6 +253,47 @@ def refs(expr, name):
     return re.search(r'(?<![\w.$])%s\b' % re.escape(name), expr or '') is not None
 
 
+MARKER = '.gen_sim'
+GENERATED_DIRS = {'sim', 'tb', 'roms', 'ipcore_dir', 'isim', 'simout'}
+GENERATED_FILES = {MARKER, 'sim.prj', 'sim.env', 'subst.txt', 'summary.txt', 'run_sys_sim.sh',
+                   # written by run_sys_sim.sh / fuse / the simulator
+                   'sim_full.prj', 'run.tcl', 'tb.exe', 'fuse.log', 'fuse.xmsgs', 'fuseRelaunch.cmd', 'fuse_time.txt',
+                   'isim.wdb', 'sim.log', 'sim.out', 'sim_time.txt', 'perf.txt'}
+
+
+def inside(path, d):
+    try:
+        return os.path.commonpath([os.path.normcase(path), os.path.normcase(d)]) == os.path.normcase(d)
+    except ValueError:
+        return False
+
+
+def check_out_dir(out, rev, tbd, ipcore_dir, ipcore_ref):
+    """Refuse an out_dir that is not ours (N1): it must hold the marker of an earlier gen_sim run,
+    or nothing but the revision export; the inputs must not lie inside it."""
+    if os.path.normcase(rev) == os.path.normcase(out):
+        die('out_dir %s is the revision export itself' % out)
+    for what, p in (('tb_dir', tbd), ('--ipcore-dir', ipcore_dir), ('--ipcore-ref', ipcore_ref)):
+        if inside(p, out):
+            die('%s %s lies inside out_dir %s' % (what, p, out))
+    if os.path.isdir(out):
+        others = [e for e in os.listdir(out) if os.path.normcase(os.path.join(out, e)) != os.path.normcase(rev)]
+        if others and not os.path.isfile(os.path.join(out, MARKER)):
+            die('out_dir %s holds %s and no %s marker: not a work tree of gen_sim, refused'
+                % (out, ', '.join(sorted(others)[:5]), MARKER))
+
+
+def clean_out_dir(out):
+    if not os.path.isdir(out):
+        return
+    for name in os.listdir(out):
+        p = os.path.join(out, name)
+        if name in GENERATED_DIRS and os.path.isdir(p) and not os.path.islink(p):
+            shutil.rmtree(p)
+        elif (name in GENERATED_FILES or name.lower().endswith('.mif')) and os.path.isfile(p):
+            os.remove(p)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('rev_dir')
@@ -262,6 +314,7 @@ def main():
     a = ap.parse_args()
 
     rev, tbd, out = [os.path.abspath(x) for x in (a.rev_dir, a.tb_dir, a.out_dir)]
+    check_out_dir(out, rev, tbd, os.path.abspath(a.ipcore_dir), os.path.abspath(a.ipcore_ref))
     sysdir = os.path.join(tbd, 'src', 'sim', 'sys')
     board = BOARDS[a.board]
     top = board['top']
@@ -331,7 +384,7 @@ def main():
     if si is None or si.width() != 2 or not re.search(r'\bSYMBOLS\s*\[\s*symbol_index\s*\]', s.text):
         die('#13 %s: expected SYMBOLS[symbol_index] with a 2-bit symbol_index' % s.key)
     s.text = j.sub(13, s.key, s.text, r'reg (\[7:0\]) SYMBOLS \[0:2\]; initial begin ',
-                   r"reg \1 SYMBOLS [0:3]; initial begin SYMBOLS[3] = 8'h00; ", 1, MACROS_SYM3)
+                   r"reg \1 SYMBOLS [0:3]; initial begin SYMBOLS[3] = 8'h28; ", 1, MACROS_SYM3)
 
     # ---- #2 top: reg -> wire on nets driven by mcu outputs
     s = need(top)
@@ -363,13 +416,17 @@ def main():
     for label, sens, body in hdl.vhdl_processes(core, cu):
         if not re.search(r'(?i)\bKB_STATUS\b', body):
             continue
-        if re.search(r"(?i)\b(rising_edge|falling_edge)\b|'event\b", body) or sens is None:
-            continue
+        if sens is None:
+            continue      # wait-statement process: no sensitivity list to check
+        comb = hdl.vhdl_outside_edge(body)
+        if not re.search(r'(?i)\bKB_STATUS\b', comb):
+            continue      # read only inside the clock-edge branch
         if 'kb_status' not in sens:
             die('#4 %s: process (%s) reads KB_STATUS but its sensitivity list is (%s)'
                 % (s.key, label or 'unlabelled', ', '.join(sens)))
         sens_ok.append('(%s)' % ', '.join(sens))
-    checks.append('#4 hid_parser_core: combinational processes reading KB_STATUS have it in the sensitivity list: %s'
+    checks.append('#4 hid_parser_core: processes reading KB_STATUS outside a clock-edge branch have it in the '
+                  'sensitivity list: %s'
                   % ('; '.join(sens_ok) or 'none read it'))
     s.text = core
     s.extra.append((os.path.splitext(s.key)[0] + '_wrap.vhd', wrap))
@@ -409,8 +466,7 @@ def main():
     for mem in COREGEN_MEMS:
         s = need(mem)
         s.text = j.sub(9, s.key, s.text, r'\.C_SIM_COLLISION_CHECK\("ALL"\)', '.C_SIM_COLLISION_CHECK("NONE")', 1,
-                       'C_SIM_COLLISION_CHECK("ALL") -> ("NONE"): the behavioural model gives X on a port collision, '
-                       'the hardware deterministic data by the write mode')
+                       COLL_DECL)
 
     # ---- #10 ideal clock models (work shadows unisims_ver), expected per board
     models = []
@@ -459,18 +515,22 @@ def main():
     if re.search(r'\bwire\b[^;]*(?<![\w.$])cpu_int\s*=', cb):
         drivers.append('declaration assignment')
     conn_notes = []
-    for inst, mod in cu.insts:
-        conns = None
-        if mod in PRIMS:
-            conns = hdl.verilog_inst_conns(cu.src.text, cu, mod, inst)
-            child = None
-        else:
-            child = units.get(mod.lower())
-            conns = hdl.verilog_inst_conns(cu.src.text, cu, mod, inst)
-        for port, actual in (conns or {}).items():
+    for cell, inst, conns in hdl.verilog_all_insts(cu, cu.src.text):
+        if not any(refs(v, 'cpu_int') for v in conns.values()):
+            continue
+        child = units.get(cell.lower())
+        for port, actual in conns.items():
             if not refs(actual, 'cpu_int'):
                 continue
-            d = port_dir(child, port) if child is not None else None
+            if port.startswith('#'):
+                drivers.append('positional connection %s of %s %s (cannot resolve the direction)'
+                               % (port[1:], cell, inst))
+                continue
+            if child is None:
+                drivers.append('instance %s of the unknown cell %s, port %s (cannot resolve the direction)'
+                               % (inst, cell, port))
+                continue
+            d = port_dir(child, port)
             conn_notes.append('%s.%s (%s)' % (inst, port, d or 'unknown direction'))
             if d != 'in':
                 drivers.append('instance %s port %s (%s)' % (inst, port, d or 'unknown direction'))
@@ -564,7 +624,7 @@ def main():
         for r in read_tsv(a.xcheck_map):
             xover[r['id']] = r['modules']
     vlines, hlines = {}, {}      # unit -> Verilog / VHDL checker lines
-    xc_land, xc_exempt, xc_other = [], [], 0
+    xc_land, xc_exempt, xc_other = [], [], []
     numeric_rx = r'(?im)^\s*use\s+ieee\.numeric_std\.all\s*;'
 
     def vhdl_check(u, expr, label, decl_typ):
@@ -591,12 +651,12 @@ def main():
                 'sim_ctl.xcount = sim_ctl.xcount + 1; end' % (expr, label, expr))
 
     for r in xrows:
-        boards = [x.strip() for x in r['boards'].split(',') if x.strip()]
-        if a.board not in boards:
-            xc_other += 1
-            continue
         reg = r['register']
         cands = [x.strip() for x in xover.get(r['id'], r['modules']).split(',') if x.strip()]
+        # board membership from the RTL hierarchy (N2): the row applies if a candidate is instantiated
+        if not any(counts.get(c.lower(), 0) for c in cands):
+            xc_other.append(r['id'])
+            continue
         hits = []
         for c in cands:
             u = logical.get(c.lower())
@@ -644,9 +704,14 @@ def main():
                 label = '%s.%s.%s' % (path, inst, port) if path else '%s.%s' % (inst, port)
                 if pu.lang == 'verilog':
                     conns = hdl.verilog_inst_conns(pu.src.text, pu, cname, inst) or {}
+                    if any(k.startswith('#') for k in conns):
+                        die('X-check %s: positional connections of %s instance %s cannot be resolved'
+                            % (where, pu.name, inst))
                     actual = [v for k, v in conns.items() if k.lower() == port.lower()]
                     if not actual or not actual[0]:
-                        die('X-check %s: out port %s unconnected in %s instance %s' % (where, port, pu.name, inst))
+                        xc_exempt.append('%s -> %s: out port %s unconnected in %s instance %s (no load)'
+                                         % (r['id'], where, port, pu.name, inst))
+                        continue
                     vlines.setdefault(pu.name.lower(), (pu, []))[1].append(verilog_check(actual[0], label))
                     xc_land.append('%s -> %s, out port: checked on the net %s of %s (instance %s)'
                                    % (r['id'], where, actual[0], pu.name, inst))
@@ -654,7 +719,9 @@ def main():
                 conns = hdl.vhdl_inst_conns(pu.src.text, pu, inst) or {}
                 actual = conns.get(port.lower())
                 if not actual or actual.lower() == 'open':
-                    die('X-check %s: out port %s unconnected in %s instance %s' % (where, port, pu.name, inst))
+                    xc_exempt.append('%s -> %s: out port %s unconnected in %s instance %s (no load)'
+                                     % (r['id'], where, port, pu.name, inst))
+                    continue
                 base = re.match(r'^(\w+)', actual).group(1)
                 pd = pu.regs.get(base.lower()) or pu.ports.get(base.lower())
                 if pd is not None and pd.kind == 'port' and pd.mode == 'out' and actual == base:
@@ -721,17 +788,10 @@ def main():
             ed = [(s0, e0, t.replace('\r\n', '\n').replace('\n', '\r\n')) for s0, e0, t in ed]
         bykey[key].text = subst.apply_edits(bykey[key].text, ed)
 
-    # ---- write the tree: everything of an earlier generation or run goes (isim/, tb.exe, .mif, logs);
-    # only the export of the revision stays
-    if os.path.isdir(out):
-        for name in os.listdir(out):
-            p = os.path.join(out, name)
-            if os.path.abspath(p) == rev:
-                continue
-            if os.path.isdir(p) and not os.path.islink(p):
-                shutil.rmtree(p)
-            else:
-                os.remove(p)
+    # ---- write the tree: the known outputs of an earlier generation or run go (N1), nothing else
+    clean_out_dir(out)
+    write(os.path.join(out, MARKER), 'work tree of src/sim/sys/gen/gen_sim.py: generated names %s\n'
+          % ' '.join(sorted(GENERATED_DIRS | GENERATED_FILES) + ['*.mif']))
     prj_lines = []
     support = [('vhdl', 'sim/support/sim_xcheck.vhd', read(os.path.join(sysdir, 'sim_xcheck.vhd')))]
     for lang, key, text in support:
@@ -814,7 +874,8 @@ def main():
               'count sim_ctl.xtotal)' % (rel(xc_path, tbd).replace('\\', '/'), xc_total))
     sm += ['  ' + x for x in xc_land]
     sm += ['  %s (exempt)' % x for x in xc_exempt]
-    sm.append('  rows of other boards: %d' % xc_other)
+    sm.append('  rows of other boards (no candidate module in the hierarchy of %s): %d%s'
+              % (top, len(xc_other), (': ' + ', '.join(xc_other)) if xc_other else ''))
     sm.append('')
     sm.append('CHECKS')
     sm += ['  ' + x for x in checks]

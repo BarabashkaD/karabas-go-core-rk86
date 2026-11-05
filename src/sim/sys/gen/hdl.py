@@ -228,13 +228,46 @@ def verilog_inst_conns(text, unit, module, inst):
             continue
         o = im.end() - 1
         c = match_paren(b, o)
-        res = {}
-        for item in split_top(b[o + 1:c], ','):
-            pm = re.match(r'^\s*\.(\w+)\s*\((.*)\)\s*$', item, re.S)
-            if pm:
-                res[pm.group(1)] = ' '.join(pm.group(2).split())
-        return res
+        return _conn_items(b[o + 1:c])
     return None
+
+
+def _conn_items(text):
+    """Named connections {port: actual}; positional ones under the keys '#0', '#1', ..."""
+    res = {}
+    for k, item in enumerate(split_top(text, ',')):
+        pm = re.match(r'^\s*\.(\w+)\s*\((.*)\)\s*$', item, re.S)
+        if pm:
+            res[pm.group(1)] = ' '.join(pm.group(2).split())
+        elif item.strip():
+            res['#%d' % k] = ' '.join(item.split())
+    return res
+
+
+V_STMT_KW = V_KEYWORDS | set('''assign always initial if else case for while begin end function task wire reg
+integer localparam parameter input output inout genvar generate return repeat forever fork join wait
+disable force release deassign casex casez default'''.split())
+
+
+def verilog_all_insts(u, text):
+    """Every instantiation statement in a Verilog unit, whatever the cell (known module, primitive,
+    unknown): [(cell, instance, {connections, positional under '#n'})]."""
+    b = blank_comments_v(text)
+    res = []
+    for m in re.finditer(r'(?m)(?:^|(?<=;))[ \t]*(\w+)(\s*#\s*\()?', b[u.start:u.end]):
+        cell = m.group(1)
+        if cell in V_STMT_KW or cell == u.name:
+            continue
+        i = u.start + m.end()
+        if m.group(2):
+            i = match_paren(b, i - 1) + 1
+        im = re.compile(r'\s*(\\\S+|\w+)\s*\(').match(b, i)
+        if not im or im.group(1) in V_STMT_KW:
+            continue
+        o = im.end() - 1
+        c = match_paren(b, o)
+        res.append((cell, im.group(1).lstrip('\\'), _conn_items(b[o + 1:c])))
+    return res
 
 
 def vhdl_inst_conns(text, unit, inst):
@@ -264,6 +297,8 @@ def vhdl_processes(text, unit):
     res = []
     for an, s, e in unit.archs:
         for m in re.finditer(r'(?i)(?:\b(\w+)\s*:\s*)?\bprocess\b\s*(\(([^)]*)\))?', b[s:e]):
+            if re.search(r'(?i)\bend\s*$', b[s:s + m.start()]):
+                continue      # "end process"
             st = s + m.end()
             em = re.compile(r'(?i)\bend\s+process\b').search(b, st, e)
             body = b[st:em.start() if em else e]
@@ -272,6 +307,40 @@ def vhdl_processes(text, unit):
                 sens = [x.strip().lower() for x in m.group(3).split(',') if x.strip()]
             res.append((m.group(1) or '', sens, body))
     return res
+
+
+def vhdl_outside_edge(body):
+    """The text of a process body outside the branches guarded by a clock edge
+    (rising_edge / falling_edge / 'event): what the process reads combinationally."""
+    toks = list(re.finditer(r"(?i)\bend\s+if\b|\belsif\b|\belse\b|\bif\b|\bthen\b", body))
+    out, keep_from, depth, skip_depth, pending_edge, cond_start = [], 0, 0, None, False, 0
+    for t in toks:
+        w = ' '.join(t.group(0).lower().split())
+        if w == 'if':
+            depth += 1
+            cond_start = t.end()
+        elif w == 'elsif':
+            if skip_depth == depth:
+                skip_depth = None
+                keep_from = t.start()
+            cond_start = t.end()
+        elif w == 'then':
+            cond = body[cond_start:t.start()]
+            if skip_depth is None and re.search(r"(?i)\b(rising_edge|falling_edge)\b|'event\b", cond):
+                out.append(body[keep_from:t.end()])
+                skip_depth = depth
+        elif w == 'else':
+            if skip_depth == depth:
+                skip_depth = None
+                keep_from = t.start()
+        elif w == 'end if':
+            if skip_depth == depth:
+                skip_depth = None
+                keep_from = t.start()
+            depth -= 1
+    if skip_depth is None:
+        out.append(body[keep_from:])
+    return ' '.join(out)
 
 
 def vhdl_array_elem(text, unit, typ):
