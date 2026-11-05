@@ -3,9 +3,13 @@
 # Usage: bash run_sys_sim.sh <work_dir> <out_dir> [plusarg ...]
 #   <work_dir>  the work tree (sim.prj with paths relative to it, sim.env, the .mif files, roms/)
 #   <out_dir>   results: summary.txt, subst.txt, fuse.log, sim.log, perf.txt, simout/*
-#   plusarg     passed to the simulator as -testplusarg <plusarg>
+#   plusarg     NAME=value (a leading + is dropped), passed to the simulator as -testplusarg NAME=value
+# fuse --nodebug: no HDL debugging support (the runs are batch only; about 10 % faster).
 # Env: ISE_SETTINGS (default /opt/Xilinx/14.7/ISE_DS/settings64.sh), RUN_TIME (simulator run
-#   command argument, e.g. "2 ms"; default: run all, the TB ends with $finish), FUSE_EXTRA.
+#   command argument, e.g. "2 ms"; default: run all, the TB ends with $finish), FUSE_EXTRA,
+#   MIN_RATE (reference cycles per second the run must reach for VERDICT PASS; default 15000).
+# perf.txt: times, memory, the rate (TB_CYCLES of the log / wall clock of the run), the TB RESULT line and
+#   VERDICT PASS|FAIL (TB result PASS and rate >= MIN_RATE).
 set -e
 WORK=$(cd "$1" && pwd)
 OUT=$2
@@ -35,16 +39,33 @@ fi
 
 FUSE_STATUS=0
 /usr/bin/time -v -o fuse_time.txt fuse -incremental -prj sim_full.prj -L work -L unisims_ver -L unisim \
-  -i tb -d "$DEFINE" -top "work.$TB_TOP" -top work.sim_ctl -top work.glbl -o tb.exe $FUSE_EXTRA \
+  -i tb -d "$DEFINE" -top "work.$TB_TOP" -top work.sim_ctl -top work.glbl -o tb.exe --nodebug $FUSE_EXTRA \
   > fuse.log 2>&1 || FUSE_STATUS=$?
 
 SIM_STATUS=-1
 if [ "$FUSE_STATUS" = 0 ]; then
   PLUS=""
-  for p in "$@"; do PLUS="$PLUS -testplusarg $p"; done
+  for p in "$@"; do PLUS="$PLUS -testplusarg ${p#+}"; done   # ISim takes NAME=value, no leading +
   mkdir -p simout
   SIM_STATUS=0
   /usr/bin/time -v -o sim_time.txt ./tb.exe -tclbatch run.tcl $PLUS -log sim.log > sim.out 2>&1 || SIM_STATUS=$?
+fi
+
+# wall clock seconds of a /usr/bin/time -v report
+elapsed_s() { awk -F': ' '/Elapsed/ { n = split($2, a, ":"); s = 0; for (i = 1; i <= n; i++) s = s * 60 + a[i]; print s }' "$1"; }
+CYCLES=""; RATE=""; RESULT=""
+if [ -f sim.log ]; then
+  CYCLES=$(grep -m1 '^TB_CYCLES' sim.log | awk '{print $2}' || true)
+  RESULT=$(grep -m1 '^RESULT' sim.log || true)
+fi
+if [ -n "$CYCLES" ] && [ -f sim_time.txt ]; then
+  RATE=$(awk -v c="$CYCLES" -v s="$(elapsed_s sim_time.txt)" 'BEGIN { if (s > 0) printf "%d", c / s }')
+fi
+# verdict: the TB result (if the TB prints one) and the simulation rate (MIN_RATE reference cycles/s)
+MIN_RATE=${MIN_RATE:-15000}
+VERDICT=""
+if [ -n "$RESULT" ]; then
+  if echo "$RESULT" | grep -q ' PASS' && [ -n "$RATE" ] && [ "$RATE" -ge "$MIN_RATE" ]; then VERDICT=PASS; else VERDICT=FAIL; fi
 fi
 
 {
@@ -53,6 +74,9 @@ fi
   [ -f fuse_time.txt ] && grep -E "Elapsed|Maximum resident" fuse_time.txt | sed 's/^\s*/fuse /'
   echo "sim_status $SIM_STATUS"
   [ -f sim_time.txt ] && grep -E "Elapsed|Maximum resident" sim_time.txt | sed 's/^\s*/sim /'
+  if [ -n "$CYCLES" ]; then echo "sim reference cycles $CYCLES, rate $RATE cycles/s (minimum $MIN_RATE)"; fi
+  if [ -n "$RESULT" ]; then echo "tb $RESULT"; fi
+  if [ -n "$VERDICT" ]; then echo "VERDICT $VERDICT"; fi
 } > perf.txt
 
 for f in summary.txt subst.txt fuse.log sim.log perf.txt; do
@@ -63,4 +87,4 @@ if [ -d simout ] && [ -n "$(ls -A simout)" ]; then
 fi
 cat perf.txt
 grep -E "^(ERROR|FATAL)" fuse.log | head -40 || true
-[ "$FUSE_STATUS" = 0 ] && [ "$SIM_STATUS" = 0 ]
+[ "$FUSE_STATUS" = 0 ] && [ "$SIM_STATUS" = 0 ] && [ "$VERDICT" != FAIL ]

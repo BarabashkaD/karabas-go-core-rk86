@@ -59,12 +59,21 @@ MACROS_SYM3 = ("macros SYMBOLS[3]: read at symbol_index 3 (out of range of [0:2]
                "Mram_symbol_index[1]_X_23_o_wide_mux_8_OUT111_INV_0) = 0; symbol_0,2,4,6,7 trimmed as constant 0 "
                "(radio86rk.syr 1769-1773): XST clamps the index, SYMBOLS[3] = SYMBOLS[2] = 8'h28; sim copy "
                "SYMBOLS[3] = 8'h28 (the same cells give 8'h2a, 8'h0A, 8'h28 at indices 0..2, the order of the sim copy)")
+# #14 declaration: PCM5102 din at i2sword[4:1] = 0 (pcm5102.v line 44)
+PCM_BIT16 = ("PCM5102 din <= lrck ? r2c[16 - i2sword[4:1]] : l2c[16 - i2sword[4:1]] reads bit 16 of the 16-bit "
+             "l2c / r2c at i2sword[4:1] = 0: X in RTL (DAC_DAT X on the pin). The hardware gives 0 there: XST builds "
+             "16-to-1 multiplexers (.syr 1170-1171 Go, 1291-1292 Mini G) and the netlists reduce din's D to one LUT5 "
+             "of i2sword[4:1] and the only non-constant sample bit: Go build/ref/pr07-baseline/go/radio86rk_synth.v "
+             "25343-25351 INIT 32'h20000000 = l2c[9] & (i2sword[4:1] == 7); Mini G radio86rk_minig_synth.v "
+             "34381-34389 INIT 32'h00000800 = l2c[13] & (i2sword[4:1] == 3). Sim copy: 1'b0 at i2sword[4:1] = 0")
 # #9 declaration (F7c): what the parameter does and does not do in XilinxCoreLib BLK_MEM_GEN_V7_3.v
 COLL_DECL = ('C_SIM_COLLISION_CHECK("ALL") -> ("NONE"); in the behavioural model BLK_MEM_GEN_V7_3.v the parameter '
              'is only declared (it matters for the structural unisim models): reads come from the memory array by '
              'the write mode and are never forced to X by a collision. The warnings "blk_mem_gen_v7_3 collision '
              'detected" come from the async_coll block (C_COMMON_CLK = 0, C_DISABLE_WARN_BHV_COLL = 0), print only, '
              'and are kept: they mark reads whose data is undefined on the hardware (WRITE_FIRST on the other port)')
+# the system TB (src/sim/sys/); the includes board_*.vh and chain.vh are copied next to them
+TB_FILES = ('tb_sys.v', 'sram_model.v', 'mcu_link.v', 'pin_trace.v', 'frame_capture.v')
 # top nets wired to mcu outputs but declared reg (#2)
 MCU_OUT_REGS = ('fileloader_reset', 'fileloader_wr', 'fileloader_addr', 'loader_ram_a', 'fileloader_data',
                 'loader_ram_do')
@@ -311,7 +320,8 @@ def main():
     ap.add_argument('--ipcore-sha', default='3fdb64f')
     ap.add_argument('--rev-sha', default='?')
     ap.add_argument('--tb-sha', default='?')
-    ap.add_argument('--tb', action='append', help='TB file relative to <tb_dir> (default src/sim/sys/tb_sys.v)')
+    ap.add_argument('--tb', action='append', help='TB file relative to <tb_dir> (default: src/sim/sys/ %s)'
+                    % ', '.join(TB_FILES))
     ap.add_argument('--tb-top', default='tb_sys')
     ap.add_argument('--power-up', help='default <tb_dir>/src/sim/sys/power_up.tsv')
     ap.add_argument('--power-up-map', help='per-comparison override: signal <TAB> candidate modules')
@@ -447,6 +457,16 @@ def main():
     s = need('k580ww55')
     s.text = j.sub(6, s.key, s.text, r'\balways\s+begin\b', 'always @(*) begin', 1,
                    'always begin -> always @(*) begin (ISim hangs at 0 ns)')
+
+    # ---- #14 PCM5102: bit 16 of the 16-bit l2c / r2c (out of range) reads the hardware value 0
+    if counts.get('pcm5102', 0):
+        s = need('PCM5102')
+        s.text = j.sub(14, s.key, s.text,
+                       r'\bdin(\s*)<=(\s*)lrck \? r2c\[16 - i2sword\[4:1\]\] : l2c\[16 - i2sword\[4:1\]\];',
+                       r"din\1<=\2(i2sword[4:1] == 4'd0) ? 1'b0 : (lrck ? r2c[16 - i2sword[4:1]] : "
+                       r"l2c[16 - i2sword[4:1]]); // sim copy: bit 16 reads 0 (#14)", 1, PCM_BIT16)
+    else:
+        j.note(14, '-', 'PCM5102 not in the design', found=0, expected=0)
 
     # ---- #7 HDMI I_FREQ literal width
     s = need(top)
@@ -837,7 +857,7 @@ def main():
         prj_lines.append('verilog work "%s"' % key)
     write(os.path.join(out, 'sim/support/sim_ctl.v'), read(os.path.join(sysdir, 'sim_ctl.v')))
     prj_lines.append('verilog work "sim/support/sim_ctl.v"')
-    tbs = a.tb or ['src/sim/sys/tb_sys.v']
+    tbs = a.tb or ['src/sim/sys/%s' % f for f in TB_FILES]
     for t in tbs:
         src = os.path.join(tbd, t)
         if not os.path.isfile(src):

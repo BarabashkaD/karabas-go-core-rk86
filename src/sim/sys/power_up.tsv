@@ -4,7 +4,8 @@
 # Values: XST netlist build/ref/pr07-baseline/go (radio86rk_synth.v, radio86rk.syr), extracted with
 # src/sim/sys/gen/power_up_from_netlist.py; default INIT: FD/FDE/FDR/FDRE/FDC/FDCE/LD/LDC = 0,
 # FDS/FDSE/FDP/FDPE/LDP = 1; DSP48A1 registers 0. Bits not in the netlist (trimmed) are 0 unless noted.
-# Not reviewed yet: Steps 3-4 (X-check iterations, review) come after the Task 4 chain (A7).
+# Not reviewed yet: Steps 3-4 (X-check iterations, review) come after the Task 4 chain (A7). Added by the
+# smoke run of Task 3 (X on the pins after the ROM load): loader file_load, CPU H and L.
 signal	modules	value	source	fsm
 reset_cnt	radio86rk,radio86rk_mini,radio86rk_minig	4'h0	FDE x4, INIT 0 (default), pr07-baseline/go
 sdcmd	radio86rk,radio86rk_mini,radio86rk_minig	1'b1	FDP, INIT 1 (default), pr07-baseline/go
@@ -56,8 +57,11 @@ irq	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
 ochar	k580wg75	7'd0	FDRE x7, INIT 0 (default), pr07-baseline/go
 exiwe_n	k580wt57	1'b1	FDP, INIT 1 (default), pr07-baseline/go
 wr_n	k580wm80a	1'b1	FDPE, INIT 1 (default), pr07-baseline/go
+H	k580wm80a	8'h00	FDE x8 \machine/CPU/H_7..H_0, INIT 0 (default), pr07-baseline/go (radio86rk_synth.v 7470-7512); the monitor pushes HL before loading it (BIOS FACE: PUSH H)
+L	k580wm80a	8'h00	FDE x8 \machine/CPU/L_7..L_0, INIT 0 (default), pr07-baseline/go (radio86rk_synth.v 7518-7560); the monitor pushes HL before loading it (BIOS FACE: PUSH H)
 opa	k580ww55	8'hFF	FDPE x8, INIT 1 (default), pr07-baseline/go
 opc	k580ww55	8'hFF	FDPE x4 (bits 7:4 not in the netlist, set to 1 as the reset value), INIT 1 (default), pr07-baseline/go
+file_load	loader	1'b0	FD \loader/file_load, INIT 0 (default), pr07-baseline/go (radio86rk_synth.v 33259); the loader reset (cpurst | joy_rst) never pulses at power-up
 VMODE	soft_switches	1'b0	FD, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
 SOUND	soft_switches	1'b0	FD, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
 ROM_SEL	soft_switches	2'b00	FDE x2, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
