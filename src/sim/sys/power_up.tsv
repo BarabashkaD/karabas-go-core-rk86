@@ -1,0 +1,65 @@
+# DRAFT (Task 2 Step 2): the quick init of the spike (plan F17) with the values of the hardware.
+# One row per logical register (amendment A3): signal, candidate modules (exactly one must declare it
+# in each revision), power-up value (Verilog literal; converted for VHDL), source, FSM encoding.
+# Values: XST netlist build/ref/pr07-baseline/go (radio86rk_synth.v, radio86rk.syr), extracted with
+# src/sim/sys/gen/power_up_from_netlist.py; default INIT: FD/FDE/FDR/FDRE/FDC/FDCE/LD/LDC = 0,
+# FDS/FDSE/FDP/FDPE/LDP = 1; DSP48A1 registers 0. Bits not in the netlist (trimmed) are 0 unless noted.
+# Not reviewed yet: Steps 3-4 (X-check iterations, review) come after the Task 4 chain (A7).
+signal	modules	value	source	fsm
+reset_cnt	radio86rk,radio86rk_mini,radio86rk_minig	4'h0	FDE x4, INIT 0 (default), pr07-baseline/go
+sdcmd	radio86rk,radio86rk_mini,radio86rk_minig	1'b1	FDP, INIT 1 (default), pr07-baseline/go
+state	rk_video	2'b00	FD x2, INIT 0 (default), pr07-baseline/go
+h_cnt	rk_video	11'd0	FDRE x11, INIT 0 (default), pr07-baseline/go
+v_cnt	rk_video	11'd0	FDRE x11, INIT 0 (default), pr07-baseline/go
+v_cnt2	rk_video	11'd0	FDRE x11, INIT 0 (default), pr07-baseline/go
+v_cnt_line	rk_video	2'b01	vid/FSM_7 sequential, state FF v_cnt_line_FSM_FFd1 FD INIT 0 (default) -> state 01, pr07-baseline/go (.syr 1754-1760)	vid/FSM_7 sequential: 01=0 00=1
+d_cnt	rk_video	3'd0	FDRE x3, INIT 0 (default), pr07-baseline/go
+data	rk_video	6'd0	FDR x6, INIT 0 (default), pr07-baseline/go
+address_in	rk_video	18'd0	DSP48A1 P register (PREG 1), power-up 0, pr07-baseline/go
+address_out	rk_video	18'd0	DSP48A1 P register (PREG 1), power-up 0, pr07-baseline/go
+data_in	rk_video	1'b0	FD, INIT 0 (default), pr07-baseline/go
+pixel_state	rk_video	2'b00	FD x1 (bit 1 not in the netlist), INIT 0 (default), pr07-baseline/go
+line_state	rk_video	2'b00	vid/FSM_5 sequential, state FF line_state_FSM_FFd1 FD INIT 0 (default) -> state 00, pr07-baseline/go (.syr 1762-1767)	vid/FSM_5 sequential: 00=0 01=1
+pixel_cnt	rk_video	11'd0	FDRE x11, INIT 0 (default), pr07-baseline/go
+line_cnt	rk_video	11'd0	FDRE x11, INIT 0 (default), pr07-baseline/go
+CounterX	hvsync_generator	11'd0	FDR x11, INIT 0 (default), pr07-baseline/go
+CounterY	hvsync_generator	11'd0	FDRE x11, INIT 0 (default), pr07-baseline/go
+init0	k580wg75	8'h00	FDE x7 (bit 7 not in the netlist), INIT 0 (default), pr07-baseline/go
+init1	k580wg75	8'h00	FDE x6 (bits 7:6 not in the netlist), INIT 0 (default), pr07-baseline/go
+init2	k580wg75	8'h00	FDE x8, INIT 0 (default), pr07-baseline/go
+init3	k580wg75	8'h00	FDE x4 (bits 3:0 not in the netlist), INIT 0 (default), pr07-baseline/go
+enable	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+inte	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+dmae	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+curx	k580wg75	7'd0	FDE x7, INIT 0 (default), pr07-baseline/go
+cury	k580wg75	6'd0	FDE x6, INIT 0 (default), pr07-baseline/go
+chline	k580wg75	5'd0	FDRE x5, INIT 0 (default), pr07-baseline/go
+attr	k580wg75	6'd0	FDRE x3 (bits 3:2, 0 not in the netlist), INIT 0 (default), pr07-baseline/go
+exattr	k580wg75	6'd0	FDRE x3 (bits 3:2, 0 not in the netlist), INIT 0 (default), pr07-baseline/go
+iposf	k580wg75	4'd0	FDE x4, INIT 0 (default), pr07-baseline/go
+oposf	k580wg75	4'd0	FDRE x4, INIT 0 (default), pr07-baseline/go
+ipos	k580wg75	7'h7F	FDSE x7, INIT 1 (default), pr07-baseline/go
+opos	k580wg75	8'd0	FDRE x8, INIT 0 (default), pr07-baseline/go
+ypos	k580wg75	6'd0	FDRE x6, INIT 0 (default), pr07-baseline/go
+frame	k580wg75	5'd0	FDE x5, INIT 0 (default), pr07-baseline/go
+lineff	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+exwe_n	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go (the spike used 1)
+exrd_n	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go (the spike used 1)
+exvrtc	k580wg75	1'b0	FDE, INIT 0 (default), pr07-baseline/go
+exhrtc	k580wg75	1'b0	FDE, INIT 0 (default), pr07-baseline/go
+err	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+vspfe	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+pstate	k580wg75	3'd0	FDE x3, INIT 0 (default), pr07-baseline/go
+istate	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+drq	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+irq	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
+ochar	k580wg75	7'd0	FDRE x7, INIT 0 (default), pr07-baseline/go
+exiwe_n	k580wt57	1'b1	FDP, INIT 1 (default), pr07-baseline/go
+wr_n	k580wm80a	1'b1	FDPE, INIT 1 (default), pr07-baseline/go
+opa	k580ww55	8'hFF	FDPE x8, INIT 1 (default), pr07-baseline/go
+opc	k580ww55	8'hFF	FDPE x4 (bits 7:4 not in the netlist, set to 1 as the reset value), INIT 1 (default), pr07-baseline/go
+VMODE	soft_switches	1'b0	FD, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
+SOUND	soft_switches	1'b0	FD, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
+ROM_SEL	soft_switches	2'b00	FDE x2, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
+AUTORUN	soft_switches	1'b0	FD, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
+RESET	soft_switches	1'b0	FD, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
