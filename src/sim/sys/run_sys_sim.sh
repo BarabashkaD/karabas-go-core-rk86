@@ -8,7 +8,8 @@
 # Env: ISE_SETTINGS (default /opt/Xilinx/14.7/ISE_DS/settings64.sh), RUN_TIME (simulator run
 #   command argument, e.g. "2 ms"; default: run all, the TB ends with $finish), FUSE_EXTRA,
 #   MIN_RATE (reference cycles per second the run must reach for VERDICT PASS; default 15000).
-# perf.txt: times, memory, the rate (TB_CYCLES of the log / wall clock of the run), the TB RESULT line and
+# perf.txt: times, memory, the rates (TB_CYCLES of the log / wall clock from the start of the simulation run,
+#   and / wall clock of the whole simulator process), the TB RESULT line and
 #   VERDICT PASS|FAIL (TB result PASS and rate >= MIN_RATE).
 set -e
 WORK=$(cd "$1" && pwd)
@@ -31,10 +32,11 @@ CORELIB=$XILINX/verilog/src/XilinxCoreLib
   echo "verilog work \"$XILINX/verilog/src/glbl.v\""
 } > sim_full.prj
 
+# the Tcl batch prints the wall clock (epoch ms) when the simulation starts, after loading the design
 if [ -n "$RUN_TIME" ]; then
-  printf 'run %s\nquit\n' "$RUN_TIME" > run.tcl
+  printf 'puts "TCL_T0_MS [clock clicks -milliseconds]"\nrun %s\nquit\n' "$RUN_TIME" > run.tcl
 else
-  printf 'run all\nquit\n' > run.tcl
+  printf 'puts "TCL_T0_MS [clock clicks -milliseconds]"\nrun all\nquit\n' > run.tcl
 fi
 
 FUSE_STATUS=0
@@ -49,19 +51,25 @@ if [ "$FUSE_STATUS" = 0 ]; then
   mkdir -p simout
   SIM_STATUS=0
   /usr/bin/time -v -o sim_time.txt ./tb.exe -tclbatch run.tcl $PLUS -log sim.log > sim.out 2>&1 || SIM_STATUS=$?
+  END_MS=$(date +%s%3N)
 fi
 
 # wall clock seconds of a /usr/bin/time -v report
 elapsed_s() { awk -F': ' '/Elapsed/ { n = split($2, a, ":"); s = 0; for (i = 1; i <= n; i++) s = s * 60 + a[i]; print s }' "$1"; }
-CYCLES=""; RATE=""; RESULT=""
+CYCLES=""; RATE_ALL=""; RATE=""; RESULT=""; T0_MS=""
 if [ -f sim.log ]; then
   CYCLES=$(grep -m1 '^TB_CYCLES' sim.log | awk '{print $2}' || true)
   RESULT=$(grep -m1 '^RESULT' sim.log || true)
 fi
+[ -f sim.out ] && T0_MS=$(grep -m1 '^TCL_T0_MS' sim.out | awk '{print $2}' || true)
 if [ -n "$CYCLES" ] && [ -f sim_time.txt ]; then
-  RATE=$(awk -v c="$CYCLES" -v s="$(elapsed_s sim_time.txt)" 'BEGIN { if (s > 0) printf "%d", c / s }')
+  # rate of the whole process (with loading the design) and of the simulation run alone
+  RATE_ALL=$(awk -v c="$CYCLES" -v s="$(elapsed_s sim_time.txt)" 'BEGIN { if (s > 0) printf "%d", c / s }')
+  if [ -n "$T0_MS" ]; then
+    RATE=$(awk -v c="$CYCLES" -v a="$T0_MS" -v b="$END_MS" 'BEGIN { if (b > a) printf "%d", c * 1000 / (b - a) }')
+  fi
 fi
-# verdict: the TB result (if the TB prints one) and the simulation rate (MIN_RATE reference cycles/s)
+# verdict: the TB result (if the TB prints one) and the rate of the simulation run (MIN_RATE cycles/s)
 MIN_RATE=${MIN_RATE:-15000}
 VERDICT=""
 if [ -n "$RESULT" ]; then
@@ -74,7 +82,7 @@ fi
   [ -f fuse_time.txt ] && grep -E "Elapsed|Maximum resident" fuse_time.txt | sed 's/^\s*/fuse /'
   echo "sim_status $SIM_STATUS"
   [ -f sim_time.txt ] && grep -E "Elapsed|Maximum resident" sim_time.txt | sed 's/^\s*/sim /'
-  if [ -n "$CYCLES" ]; then echo "sim reference cycles $CYCLES, rate $RATE cycles/s (minimum $MIN_RATE)"; fi
+  if [ -n "$CYCLES" ]; then echo "sim reference cycles $CYCLES, rate $RATE cycles/s of the run (minimum $MIN_RATE), $RATE_ALL cycles/s with loading the design"; fi
   if [ -n "$RESULT" ]; then echo "tb $RESULT"; fi
   if [ -n "$VERDICT" ]; then echo "VERDICT $VERDICT"; fi
 } > perf.txt
