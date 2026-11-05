@@ -67,7 +67,8 @@ SEGA joysticks (both ports):
 
 The machine and its native video are board-neutral modules; each board top connects the
 machine to the board, and `rk_video` wraps the native video. Another platform (for example the Analogue Pocket) uses the same modules
-with its own keyboard, memory and video output.
+with its own keyboard, memory and video output; for the video, `rk86_video_stream` gives it the
+native dots with the visible area, the sync and the line and frame starts and ends.
 
 ```mermaid
 flowchart LR
@@ -84,6 +85,10 @@ flowchart LR
             nv["rk86_video<br/>CRT timebase,<br/>dot shift register"]
         end
     end
+    subgraph stream["board-neutral, not in the Karabas builds"]
+        st["rk86_video_stream<br/>dot strobe, data enable,<br/>sync, line and frame start and end"]
+    end
+    pk["another platform<br/>(Analogue Pocket):<br/>frame buffer, display"]
     mcu -->|"HID reports, joysticks"| kbd
     mcu -->|"ROM and tape images"| mem
     kbd -->|"columns, Shift/Ctrl keys"| m
@@ -93,6 +98,8 @@ flowchart LR
     m -->|"character, line,<br/>attributes"| nv
     nv <-->|"glyph address and row,<br/>dots, dot counters"| vid
     vid --> out
+    nv -->|"dots, dot step,<br/>counters, CRT sync"| st
+    st -.->|"native dot stream"| pk
     m -->|"PC0, INTE"| snd
     m <-->|"window A000-BFFF"| sd
 ```
@@ -104,6 +111,7 @@ flowchart LR
 | memory, ROM, loading | the CPU and DMA bus | SRAM, the MCU loader | its own |
 | native video: CRT timebase, dots | `rk86_video` | the same | the same |
 | video output | the dots, the dot step and counters, the font ROM port of `rk86_video` | `rk_video` (font ROM, framebuffer, VGA timing), OSD, VGA or HDMI | its own output |
+| native dot stream | `rk86_video_stream`: dot strobe, data enable, sync, line and frame start and end | not used | the input of its frame buffer |
 | sound | PC0 and INTE | per-board mixing, DAC | its own |
 
 The boundaries, the signals that cross them and the invariants are in

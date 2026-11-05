@@ -10,7 +10,7 @@ This document fixes the boundaries between a board-neutral machine, the Karabas 
 
 ## 2. Modules
 
-`karabas_keyboard` and `rk86_machine` have their bodies, moved from the three tops without changes; the tops instantiate them. `rk86_video` has the native part of `rk_video`, moved without changes; `rk_video` instantiates it.
+`karabas_keyboard` and `rk86_machine` have their bodies, moved from the three tops without changes; the tops instantiate them. `rk86_video` has the native part of `rk_video`, moved without changes; `rk_video` instantiates it. `rk86_video_stream` is new: the native dot stream of `rk86_video` for a platform without the Karabas framebuffer; no board top instantiates it.
 
 ### `rk86_machine` (`src/rtl/rk86_machine.v`)
 
@@ -54,7 +54,7 @@ It contains the native video of the Radio-86RK: the timebase of the CRT (`state`
 | Clock | `clk` |
 | From the CRT | `line[3:0]` (bits 2:0 used), `ichar[6:0]`, `vsp`, `lten`, `rvv` |
 | Timebase to the CRT | `cce`, `hrtc`, `vrtc` (combinational from the counters) |
-| Font ROM | `font_addr[9:0]` = `{ichar, line[2:0]}` (out, combinational), `font_data[7:0]` (in, bits 5:0 used): the ROM answers one `clk` later |
+| Font ROM | `font_addr[9:0]` = `{ichar, line[2:0]}` (out, combinational), `font_data[7:0]` (in, bits 5:0 used): the ROM answers 1 `clk` later on the Karabas boards; 0 to 16 `clk` are allowed, see `rk86_video_stream` |
 | Native picture | `pix_ce` (`state == 0`, one `clk` of 3), `pix` (the dot, `data[5]`), `h_cnt[10:0]` (0 to 515), `v_cnt[10:0]` (0 to 619) |
 
 A board samples `pix`, `h_cnt` and `v_cnt` on the `clk` edge where `pix_ce` is high; all three change at that edge. `rk86_video` is not in `docs/contract-signals.csv`: it sits inside `rk_video`, and its ports are not signals of the tops.
@@ -64,15 +64,61 @@ A board samples `pix`, `h_cnt` and `v_cnt` on the `clk` edge where `pix_ce` is h
 - `clk` on the Karabas boards is 40 MHz (the PLL output, historically named `clk50`; `src/ipcore/pll/pll.xco` has `clkout1_requested_out_freq=40`). The dot is `clk`/3 = 13.33 MHz. `cce` is `clk`/18 = 2.22 MHz. A line is 516 dots = 1548 `clk` = 38.7 us. A frame is 620 lines = 959 760 `clk`, about 24.0 ms (41.7 Hz). The moved comment "16MHz from 48MHz" stays as it was; these are the real values.
 - Decision: `rk86_video` and `rk86_machine` run from `clk` = 40 MHz, one dot per 3 cycles. The platform provides 40 MHz (the Pocket with its own PLL). There is no clock enable input and none is planned: it would change the clock of the whole machine.
 - `cce` goes to the CRT and the DMA, `hrtc` and `vrtc` to the CRT, all without a register.
-- `d_cnt == h_cnt mod 6`: both are cleared at the line end and advance under the same strobe. The glyph row is loaded when `d_cnt == 5`. The exact phase dot to character cell, with the latency of the ROM, is defined in PR10 (the dot stream, with simulation) and is not claimed here.
+- `d_cnt == h_cnt mod 6`: both are cleared at the line end and advance under the same strobe. The glyph row is loaded on the dot step where `d_cnt == 5`, so a character cell is the 6 dots `h_cnt` 6n to 6n + 5, the leftmost dot from `font_data` bit 5. Which character of the screen lands in which cell is in `rk86_video_stream`, **Geometry**.
 - The line doubling is a property of the CRT, not of `rk86_video`: in both line modes the glyph row `line` comes from `chline[4:1]`, and `chline` advances on every falling edge of `hrtc` (`k580wg75.v:81, 117-131`), so each glyph row goes on two adjacent `v_cnt`.
 - The window `h_cnt` 60 to 467 (408 dots = 68 character cells), one line of two (`v_cnt_line`) and `v_cnt2 < 300` are a choice of the Karabas wrapper, not a native property. `v_cnt_line` is not reset at the end of the frame (only `v_cnt2` is) and does not toggle on the last line, so it toggles 619 times in a frame of 620 lines: the written lines are the even `v_cnt` in one frame and the odd ones in the next.
 - There is no reset: the initial values are the INIT = 0 of the FPGA. Every register of `rk86_video` (`state`, `d_cnt`, `data`, `h_cnt`, `v_cnt`) and of the wrapper (`v_cnt2`, `v_cnt_line`, `address_in`, `data_in`, ...) starts at 0; a cycle-exact simulation must set them to 0. No `initial` is added in PR09: XST would then infer `state` as an FSM (HDL ADVISOR in the `.syr`), and the names and the encoding would change.
-- Outputs such as `pix_de`, `line_end`, `frame_end` are added later (PR10) as new ports; the existing ports do not change.
+- The visible area, the sync and the line and frame starts and ends for a platform without the Karabas framebuffer are in the separate module `rk86_video_stream`; the ports of `rk86_video` do not change.
+
+### `rk86_video_stream` (`src/rtl/rk86_video_stream.v`)
+
+The native dot stream of `rk86_video` for a platform without the Karabas framebuffer (the Analogue Pocket). It is combinational, with no state and no clock: the outputs are functions of the `rk86_video` outputs. No board top instantiates it, and the Karabas builds do not contain it. It is not in `docs/contract-signals.csv`: its ports are not signals of the tops.
+
+| Port | Dir | Meaning |
+|---|---|---|
+| `pix_ce`, `pix`, `hrtc`, `vrtc`, `h_cnt[10:0]`, `v_cnt[10:0]` | in | the ports of `rk86_video` with the same names |
+| `ce` | out | the dot strobe, `pix_ce` (one `clk` of 3 at `clk` 40 MHz without a clock enable) |
+| `de` | out | the visible area, `hrtc & vrtc`: `h_cnt` 0 to 467 and `v_cnt` 0 to 599 |
+| `dot` | out | the dot, `pix & de`: 1 = lit, 0 outside the visible area |
+| `hs` | out | the horizontal sync, active high, `~hrtc`: `h_cnt` 468 to 515 |
+| `vs` | out | the vertical sync, active high, `~vrtc`: `v_cnt` 600 to 619 |
+| `line_start` | out | the first dot of a line, `h_cnt == 0`, on every line (the sync lines too) |
+| `frame_start` | out | the first dot of a frame, `h_cnt == 0 && v_cnt == 0`; also the first dot of the visible area |
+| `line_end` | out | the last dot of the visible area in a line, `de && h_cnt == 467` (lines 0 to 599) |
+| `frame_end` | out | the last dot of the visible area in a frame, `line_end && v_cnt == 599` |
+
+**Timing**
+
+- The contract is written in `pix_ce` strobes. All outputs except `ce` change only on the `clk` edge where `pix_ce` is high, together with `pix`, `h_cnt` and `v_cnt`, and hold until the next such edge: 3 `clk` in the Karabas configuration (`clk` 40 MHz without a clock enable). A platform samples them on the edge where `ce` is high and gets one dot per sample: the dot (`h_cnt`, `v_cnt`). There is no latency between the outputs and the counters. A clock enable of the timebase would not change this contract, provided `pix_ce` remains one `clk` per dot (PR11 must keep it so).
+- Sample the outputs in the `clk` domain of `rk86_video` and register them before any clock crossing: they are combinational.
+- A line is 516 dots: 468 with `de` (the first with `line_start`, the last with `line_end`), then 48 with `hs`. A frame is 620 lines: 600 with `de` (`frame_end` on the last dot of the last one), then 20 with `vs`. `de` never overlaps `hs` or `vs`. At `clk` = 40 MHz: a dot is 13.33 MHz, a line 38.7 us, a frame 959 760 `clk` (41.7 Hz).
+- Edges: `de` rises with `line_start` on lines 0 to 599 and falls where `hs` rises (`h_cnt` 468), right after `line_end`; `hs` falls with `line_start`; `vs` rises with `line_start` of line 600 and falls with `frame_start`.
+- `line_end` and `frame_end` mark the last dot of the native visible area. A platform that crops another window decodes the last dot of its window from the counters itself; for the Karabas window 408 x 300 (`h_cnt` 60 to 467, `v_cnt[0] == 0`) that is `h_cnt == 467 && v_cnt == 598`.
+- The font ROM may answer combinationally or up to 16 `clk` after the `clk` edge where `font_addr` changes: the address changes on a `cce` edge and the glyph row is loaded 17 `clk` edges later. The picture is the same (simulated with 0, 1 and 16); 17 fails (derived: the previous glyph row is loaded, one column late). The Karabas font core answers in 1. With a clock enable there are only more `clk` between the strobes, so the budget of 16 `clk` still holds.
+- The screen memory has a similar budget: the DMA address of a byte changes on a `cce` edge and the CRT takes the byte on a later `cce` edge, at least 18 `clk` later, so any memory that answers within 17 `clk` gives the same picture. (Derived from `k580wt57.v:93-130` and `k580wg75.v:158-180`; the testbench memory answers combinationally.)
+
+**Why this visible area.** `de` is the time outside the retrace of the CRT (`hrtc` and `vrtc` high). It depends only on the timebase of `rk86_video`, not on how a program sets up the CRT. The timebase matches the CRT setup of the stock BIOS (`BIOS.BIN` FACF-FADF: reset, parameters `4D 1D 99 93`, start `27`): 78 characters and 8 retrace characters per row, that is 86 characters of 6 dots = 516 dots; 30 rows and 1 retrace row of 10 lines, each line twice = 620 lines. `k580wg75.v` does not use the retrace counts; `rk86_video` has them fixed.
+
+**Geometry** (the CRT setup of the stock BIOS; simulated unless marked)
+
+- Text row k (0 to 29, the screen memory at 76D0 + 78 k while no attribute code is on the screen) is on `v_cnt` 20 k to 20 k + 19. Scan row s = (`v_cnt` mod 20) / 2: each scan row is on two adjacent lines, `v_cnt` even and odd (the line doubling of the CRT, see `rk86_video`). A platform that keeps one line of two takes `v_cnt[0] == 0`.
+- The two lines of a pair are the same unless the CRT state changes between them. At an end-of-screen code (`k580wg75.v:136-137`) the CRT sets `vspfe` in the middle of the even line of a pair: the even line shows the text up to the code, the odd line is blank entirely, and so is every line after it to the end of the frame. The code is met first on the first line of its row, scan row 0, which is blank in the BIOS setup anyway; so the row of the code is blank. (Derived from the code, not simulated.)
+- Scan rows 1 to 8 show glyph rows 0 to 7 (`line` = s - 1, line mode 1, `k580wg75.v:81`). Scan rows 0 and 9 are blank (`vsp`, `k580wg75.v:83`), except the underline of the cursor or of an attribute on scan row 9 (`lten`, `k580wg75.v:82`; the attribute underline is not simulated).
+- The cursor that the BIOS loads (command 80h, then column X and row Y; the CRT keeps X + 1 and Y + 1, `k580wg75.v:111-112`) is the underline of column X of row Y on scan row 9 (`v_cnt` 20 Y + 18 and 20 Y + 19), in the frames where bit 3 of the frame counter of the CRT is set (the blink: 8 frames on, 8 off, `k580wg75.v:77`).
+- Column c (0 to 74) of a row is on `h_cnt` 24 + 6 c to 29 + 6 c; glyph bit 5 is the leftmost dot. The CRT sees the fall of `hrtc` on `cce` at `h_cnt` 468, starts the row at position 246 (`maxx`/2 + D0h, `k580wg75.v:134`) and outputs column 0 on the 11th `cce` after it (`h_cnt` 18); the glyph row comes on the dot step from `h_cnt` 23 to 24.
+- Columns 0 to 73 are in `de`. Column 74 is on `h_cnt` 468 to 473, inside `hs`. Columns 75 to 77 are not shown: the fall of `hrtc` restarts the row (`k580wg75.v:124-135`; derived, not simulated). On `h_cnt` 0 to 23 the CRT outputs code 0 (`k580wg75.v:140-141`), whose glyph in `FONT.BIN` is blank: this field is dark unless a field attribute (reverse video or underline) carries over from the previous line (the attribute in effect at the end of the previous text row, `k580wg75.v:127, 132`).
+- A field attribute code (80h to BFh, the transparent attribute mode of the BIOS setup) takes a column: that column shows the byte after the code in the memory, with the new attribute. The attribute holds to the end of the row on every line of the row (`k580wg75.v:132`). Reverse video (90h, `rvv`) inverts the 6 dots of glyph rows 0 to 7; scan rows 0 and 9 stay blank. (Simulated with 90h and 80h in row 10.)
+- The CRT reads the byte after an attribute code into its fifo, so the row reads one byte more from the memory per code, and the rows below start that much later (`k580wg75.v:143-153, 162-179`). With the BIOS DMA count (2340 bytes, autoload) each attribute code on the screen also moves the start of the next frame by one byte: the DMA reaches its count before the screen ends, reloads 76D0 and goes on from there (`k580wt57.v:114-118`), so the picture drifts. A platform that uses attributes must take this into account. The carry of an attribute into the next row (`k580wg75.v:127`) also comes from the code. (All of this is derived, not simulated: the testbench ends row 10 with the end-of-row code F1h after 78 bytes, to keep the BIOS DMA count.)
+- The text area of the monitor, 64 x 25 (columns 8 to 71, rows 3 to 27, origin 77C2), is `h_cnt` 72 to 455 and `v_cnt` 60 to 559 (384 x 500 dots; derived from the geometry above, not simulated as an area). The Karabas framebuffer window `h_cnt` 60 to 467 (`rk_video`) shows columns 6 to 73.
+- Another `maxx` moves the columns: column 0 then starts at `h_cnt` 252 - 6 (`maxx` div 2). This is derived from `k580wg75.v:134`, not simulated.
+
+**Use on a platform with another display rate.** The native frame is 41.7 Hz; a display at another rate (60 Hz on the Analogue Pocket) needs a frame buffer. The platform writes `dot` at (`h_cnt`, `v_cnt`) when `ce` and `de` are high (468 x 600, or 468 x 300 with `v_cnt[0] == 0`), and starts a buffer frame at `frame_start`. The font ROM stays on the ports of `rk86_video`. The stream assumes the timebase of `rk86_video` as it is: the Analogue Pocket integration needs either a 40 MHz clock domain or a clock enable in `rk86_video` and `rk86_machine` (a change of the decision in `rk86_video` above), decided in PR11.
+
+**The check.** `python -B src/sim/video/run_video_sim.py [--iverilog PATH]` (tested with Icarus Verilog 13.0). The testbench `src/sim/video/tb_rk86_video_stream.v` wires the CRT `k580wg75` and the DMA `k580wt57` as in `rk86_machine`, writes to them the bytes of the BIOS and the BIOS cursor sequence (column 11, row 4), fills the screen memory with a known pattern with a reverse video field in row 10, and checks for four frames: every output on every dot against the definitions above, the dot strobe, the line and frame lengths and the edges; on frames 2 and 3, every dot against a rendering of the screen with `FONT.BIN` by the geometry above, with the cursor (both blink phases: on in frame 2, off in frame 3) and a reverse video field, and the count of lit dots against the rendering. The font ROM is a model with a latency of 1 `clk` (`--font-latency N` for others, 0 = combinational). About 30 s per run (about 70 s at latency 16).
 
 ### `src/rk86_machine.prj`
 
-The manifest lists the board-neutral sources: `k580wm80a.v`, `k580wt57.v`, `k580wg75.v`, `k580ww55.v`, `rk86_machine.v` and `rk86_video.v`. Paths are relative to `src/`. The manifest is in no ISE project. The checker elaborates it with iverilog.
+The manifest lists the board-neutral sources: `k580wm80a.v`, `k580wt57.v`, `k580wg75.v`, `k580ww55.v`, `rk86_machine.v`, `rk86_video.v` and `rk86_video_stream.v`. Paths are relative to `src/`. The manifest is in no ISE project. The checker elaborates it with iverilog.
 
 ## 3. What stays in the board top
 
