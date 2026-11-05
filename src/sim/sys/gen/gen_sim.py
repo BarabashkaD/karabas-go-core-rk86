@@ -313,6 +313,57 @@ def clean_out_dir(out, rev):
             os.remove(p)
 
 
+def read_syr_fsms(path):
+    """FSMs of an XST report: [(fsm name, signal, encoding kind, {state: code})] from the lines
+    'Optimizing FSM <name> on signal <sig[..]> with <kind> encoding.' and the State | Encoding table."""
+    if not os.path.isfile(path):
+        die('--syr %s: no such file' % path)
+    lines = read(path).splitlines()
+    res = []
+    for i, ln in enumerate(lines):
+        m = re.match(r'^Optimizing FSM <([^>]+)> on signal <(\w+)(?:\[[^\]]*\])?> with ([\w-]+) encoding\.', ln)
+        if not m:
+            continue
+        table = {}
+        k = i + 1
+        while k < len(lines) and not re.match(r'^\s*State\s*\|\s*Encoding', lines[k]):
+            k += 1
+        k += 2                                     # the rule line after the header
+        while k < len(lines):
+            tm = re.match(r'^\s*([01x]+)\s*\|\s*([01x]+)\s*$', lines[k])
+            if not tm:
+                break
+            table[tm.group(1)] = tm.group(2)
+            k += 1
+        res.append((m.group(1), m.group(2), m.group(3), table))
+    return res
+
+
+def fsm_compare(sig, module, field, fsms, syr):
+    """Compare the fsm field of a power-up row ('<fsm> <kind>: <state>=<code> ...') with the FSM
+    of the same signal in the .syr of the compared revision (Task 2 Step 4)."""
+    m = re.match(r'^\s*(\S+)\s+([\w-]+)\s*:\s*(.*)$', field)
+    if not m:
+        die('power-up row %s: fsm field %r is not "<fsm> <kind>: <state>=<code> ..."' % (sig, field))
+    kind = m.group(2)
+    table = dict(x.split('=') for x in m.group(3).split())
+    if fsms is None:
+        return 'POWER-UP UNCOMPARED (%s.%s FSM encoding: no --syr of the compared revision; table %s %s)' % (
+            module, sig, kind, m.group(3))
+    hits = [f for f in fsms if f[1] == sig]
+    if len(hits) != 1:
+        return 'POWER-UP DIFFERS (%s FSM encoding: %d FSMs on signal %s in %s, table %s %s)' % (
+            module, len(hits), sig, os.path.basename(syr), kind, m.group(3))
+    name, _, skind, stable = hits[0]
+    if skind != kind or stable != table:
+        return 'POWER-UP DIFFERS (%s FSM encoding: %s %s %s in %s, table %s %s)' % (
+            module, name, skind, ' '.join('%s=%s' % x for x in stable.items()), os.path.basename(syr),
+            kind, m.group(3))
+    return 'FSM %s.%s: %s %s %s equals the table (%s)' % (module, sig, name, skind,
+                                                        ' '.join('%s=%s' % x for x in stable.items()),
+                                                        os.path.basename(syr))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('rev_dir')
@@ -331,6 +382,8 @@ def main():
     ap.add_argument('--power-up-map', help='per-comparison override: signal <TAB> candidate modules')
     ap.add_argument('--xcheck-regs', help='default <tb_dir>/src/sim/sys/xcheck_regs.tsv')
     ap.add_argument('--xcheck-map', help='per-comparison override: id <TAB> candidate modules')
+    ap.add_argument('--syr', help='XST report (.syr) of the compared revision (its S0 build): the FSM encodings '
+                    'of the power-up rows with an fsm field are compared with it (Task 2 Step 4)')
     a = ap.parse_args()
 
     rev, tbd, out = [os.path.abspath(x) for x in (a.rev_dir, a.tb_dir, a.out_dir)]
@@ -587,7 +640,8 @@ def main():
     if a.power_up_map:
         for r in read_tsv(a.power_up_map):
             override[r['signal']] = r['modules']
-    placed, verdicts = [], []
+    placed, verdicts, fsm_checks = [], [], []
+    syr_fsms = read_syr_fsms(a.syr) if a.syr else None
     vhdl_init = {}     # unit -> [(decl, value)]
     v_init = {}        # unit -> [(sig, value)]
     for r in pu_rows:
@@ -607,14 +661,26 @@ def main():
             die('power-up row %s (%s): %d matches in %s, expected exactly 1'
                 % (sig, ','.join(cands), len(hits), [h[0] for h in hits]))
         c, u, d = hits[0]
+        if r.get('fsm'):
+            fsm_checks.append(fsm_compare(sig, c, r['fsm'], syr_fsms, a.syr))
+            if fsm_checks[-1].startswith('POWER-UP DIFFERS'):
+                verdicts.append(fsm_checks[-1])
         rtl, partial = None, False
+        mem =u.lang == 'verilog' and d.kind == 'mem'
+        if mem and len(d.dims) != 1:
+            die('power-up row %s: memory %s.%s has %d unpacked dimensions, only 1 is supported'
+                % (sig, c, d.name, len(d.dims)))
         if u.lang == 'verilog':
+            rm = re.search(r'\$readmem[hb]\s*\([^;]*?,\s*%s\b' % re.escape(d.name),
+                           hdl.blank_comments_v(u.src.text)[u.start:u.end])
             if d.init is not None:
                 rtl = d.init
+            elif rm:
+                rtl, partial = ' '.join(rm.group(0).split()) + ' ...', True
             else:
                 ws = hdl.verilog_initial_writes(u.src.text, u, d.name)
                 whole = [w for w in ws if not w[2]]
-                if whole:
+                if whole and not mem:
                     rtl = whole[0][0]
                 elif ws:
                     rtl, partial = '; '.join('%s%s = %s' % (d.name, w[2], w[0]) for w in ws), True
@@ -631,14 +697,20 @@ def main():
                 verdicts.append('POWER-UP UNCOMPARED (%s.%s: RTL %s, table %s)' % (c, d.name, rtl, value))
             placed.append('%s -> %s: kept %s' % (sig, where, status))
             continue
-        if u.lang == 'verilog':
-            v_init.setdefault(u.name.lower(), (u, []))[1].append((d.name, value))
+        if mem:
+            lo, hi = sorted(int(x) for x in d.dims[0])
+            stmt = ('\tbegin : sim_pu_%s integer i; for (i = %d; i <= %d; i = i + 1) %s[i] = %s; end'
+                    % (d.name, lo, hi, d.name, value))
+            v_init.setdefault(u.name.lower(), (u, []))[1].append(('%s[%d:%d]' % (d.name, lo, hi), stmt))
+            where += ' every element %d..%d' % (lo, hi)
+        elif u.lang == 'verilog':
+            v_init.setdefault(u.name.lower(), (u, []))[1].append((d.name, '\t%s = %s;' % (d.name, value)))
         else:
             vhdl_init.setdefault(u.name.lower(), (u, []))[1].append((d, value))
         placed.append('%s -> %s = %s (%s)' % (sig, where, value, r.get('source', '')))
     for k, (u, lst) in v_init.items():
         add_block(u, 'initial begin // sim copy: power-up values of the hardware (src/sim/sys/power_up.tsv)\n%s\nend'
-                  % '\n'.join('\t%s = %s;' % x for x in lst))
+                  % '\n'.join(x[1] for x in lst))
         j.note(11, u.src.key, 'module %s: power-up initial block, %d registers (%s)'
                % (u.name, len(lst), ', '.join(x[0] for x in lst)), found=len(lst), expected=len(lst), kind='powerup')
     for k, (u, lst) in vhdl_init.items():
@@ -913,6 +985,9 @@ def main():
     sm.append('')
     sm.append('POWER-UP (A3: where each row of %s landed)' % rel(pu_path, tbd).replace('\\', '/'))
     sm += ['  ' + x for x in placed]
+    sm.append('')
+    sm.append('FSM ENCODINGS (power-up rows with an fsm field against --syr of the compared revision)')
+    sm += ['  ' + x for x in fsm_checks] or ['  (no fsm rows)']
     sm.append('')
     sm.append('VERDICTS')
     sm += ['  ' + x for x in verdicts] or ['  (none)']

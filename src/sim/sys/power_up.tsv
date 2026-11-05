@@ -1,11 +1,18 @@
-# DRAFT (Task 2 Step 2): the quick init of the spike (plan F17) with the values of the hardware.
+# Power-up values of the hardware, inserted module-locally into the sim copies (plan Task 2).
 # One row per logical register (amendment A3): signal, candidate modules (exactly one must declare it
-# in each revision), power-up value (Verilog literal; converted for VHDL), source, FSM encoding.
-# Values: XST netlist build/ref/pr07-baseline/go (radio86rk_synth.v, radio86rk.syr), extracted with
+# in each revision), power-up value (Verilog literal; converted for VHDL; a memory gets it in every
+# element), source, FSM encoding (<fsm> <kind>: <state>=<code> ...; gen_sim --syr compares it with the
+# .syr of the compared revision and gives the verdict POWER-UP DIFFERS on a difference).
+# Values: XST netlists build/ref/pr07-baseline/<board> (the netlists of a9685c7), extracted with
 # src/sim/sys/gen/power_up_from_netlist.py; default INIT: FD/FDE/FDR/FDRE/FDC/FDCE/LD/LDC = 0,
-# FDS/FDSE/FDP/FDPE/LDP = 1; DSP48A1 registers 0. Bits not in the netlist (trimmed) are 0 unless noted.
-# Not reviewed yet: Steps 3-4 (X-check iterations, review) come after the Task 4 chain (A7). Added by the
-# smoke run of Task 3 (X on the pins after the ROM load): loader file_load, CPU H and L.
+# FDS/FDSE/FDP/FDPE/LDP = 1; DSP48A1 registers 0; LUT RAM the INIT of its cells. Bits not in the netlist
+# (trimmed) are 0 unless noted.
+# Start set (Step 2): the quick init of the spike (plan F17) with the values of the hardware. Added by
+# the X-check iterations (Step 3; X on the observed pins, in the SRAM writes or the screen memory):
+# Task 3 smoke: loader file_load, CPU H and L; Task 4 basic chain: CRT buf0 and buf1 (VGA X from
+# 18.9 ms), CPU B (PUSH B at 56 ms). Reviewed (Step 4): every register row equals the extraction of
+# go, mini and minig (power_up_bits of build/sim/sys/extract/regs_<board>.tsv); buf0 / buf1 are LUT RAM
+# with INIT 0 in all 24 cells on the three boards.
 signal	modules	value	source	fsm
 reset_cnt	radio86rk,radio86rk_mini,radio86rk_minig	4'h0	FDE x4, INIT 0 (default), pr07-baseline/go
 sdcmd	radio86rk,radio86rk_mini,radio86rk_minig	1'b1	FDP, INIT 1 (default), pr07-baseline/go
@@ -55,8 +62,11 @@ istate	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
 drq	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
 irq	k580wg75	1'b0	FD, INIT 0 (default), pr07-baseline/go
 ochar	k580wg75	7'd0	FDRE x7, INIT 0 (default), pr07-baseline/go
+buf0	k580wg75	8'h00	every element: LUT RAM \machine/crt/Mram_buf01/02 (RAM64M, INIT_A..D 64'h0), Mram_buf031/032 (RAM64X1D, INIT 64'h0), Mram_buf041..043, 051..053, 061/062 (RAM16X1D, INIT 16'h0), pr07-baseline/go (radio86rk_synth.v 4360-4537, 4665-4712); read before the first DMA row (X on VGA from 18.9 ms without it)
+buf1	k580wg75	8'h00	every element: LUT RAM \machine/crt/Mram_buf11/12 (RAM64M, INIT_A..D 64'h0), Mram_buf131/132 (RAM64X1D, INIT 64'h0), Mram_buf141..143, 151..153, 161/162 (RAM16X1D, INIT 16'h0), pr07-baseline/go (radio86rk_synth.v 4182-4359, 4617-4664); read before the first DMA row (X on VGA from 18.9 ms without it)
 exiwe_n	k580wt57	1'b1	FDP, INIT 1 (default), pr07-baseline/go
 wr_n	k580wm80a	1'b1	FDPE, INIT 1 (default), pr07-baseline/go
+B	k580wm80a	8'h00	FDE x8 \machine/CPU/B_7..B_0, INIT 0 (default), pr07-baseline/go (radio86rk_synth.v 7099-7146); the monitor pushes BC before loading B (BIOS FCBB: PUSH B in the console output, first at 56 ms: X written to 76C8)
 H	k580wm80a	8'h00	FDE x8 \machine/CPU/H_7..H_0, INIT 0 (default), pr07-baseline/go (radio86rk_synth.v 7470-7512); the monitor pushes HL before loading it (BIOS FACE: PUSH H)
 L	k580wm80a	8'h00	FDE x8 \machine/CPU/L_7..L_0, INIT 0 (default), pr07-baseline/go (radio86rk_synth.v 7518-7560); the monitor pushes HL before loading it (BIOS FACE: PUSH H)
 opa	k580ww55	8'hFF	FDPE x8, INIT 1 (default), pr07-baseline/go
