@@ -10,7 +10,8 @@
 #   MIN_RATE (reference cycles per second the run must reach for VERDICT PASS; default 15000).
 # perf.txt: times, memory, the rates (TB_CYCLES of the log / wall clock from the start of the simulation run,
 #   and / wall clock of the whole simulator process), the TB RESULT line and
-#   VERDICT PASS|FAIL (TB result PASS and rate >= MIN_RATE).
+#   VERDICT PASS|FAIL (TB result PASS and rate >= MIN_RATE; a missing RESULT line is FAIL unless sim.env
+#   says TB_RESULT=none, the stub TB). The exit status is non-zero on any FAIL.
 set -e
 WORK=$(cd "$1" && pwd)
 OUT=$2
@@ -73,7 +74,10 @@ fi
 MIN_RATE=${MIN_RATE:-15000}
 VERDICT=""
 if [ -n "$RESULT" ]; then
-  if echo "$RESULT" | grep -q ' PASS' && [ -n "$RATE" ] && [ "$RATE" -ge "$MIN_RATE" ]; then VERDICT=PASS; else VERDICT=FAIL; fi
+  if echo "$RESULT" | grep -q ' PASS$' && [ -n "$RATE" ] && [ "$RATE" -ge "$MIN_RATE" ]; then VERDICT=PASS; else VERDICT=FAIL; fi
+elif [ "${TB_RESULT:-required}" != none ]; then
+  VERDICT=FAIL    # the system TB always prints RESULT; none = it stopped without a verdict
+  RESULT="RESULT missing (simulator status $SIM_STATUS)"
 fi
 
 {

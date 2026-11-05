@@ -3,8 +3,10 @@
 // the L0 pin trace, the frame capture and the chained scenario (chain.vh).
 // fuse -d BOARD_GO (board_go.vh); BOARD_MINIG comes with board_minig.vh (plan Task 6).
 // Outputs in simout/: events.txt ("<cycle> <name>"), trace.txt, frames.txt, sram_wr.txt.
-// The run ends with "TB_CYCLES <n>" and "RESULT <chain> PASS|FAIL ..." in the log.
-// Plusargs: +CHAIN=smoke (default), +RAM_INIT, +ROMLOAD=preload, +SRAM_LOG=0 (sram_model.v),
+// The run ends with "TB_CYCLES <n>" and "RESULT <chain> PASS|FAIL ..." in the log; every fatal stop (fatal())
+// prints "RESULT <chain> FAIL fatal". Watchdogs: the reference clock must advance (counted on the board
+// clock of the TB, tbclk), and a time limit per chain (chain.vh, +MAX_MS).
+// Plusargs: +CHAIN=smoke (default), +SMOKE_MS, +MAX_MS (chain.vh), +RAM_INIT, +ROMLOAD=preload, +SRAM_LOG=0 (sram_model.v),
 // +TRACE_FROM / +TRACE_TO (pin_trace.v), +VCD_FROM=<cycle> +VCD_TO=<cycle> (simout/tb.vcd of the whole
 // TB hierarchy, debugging only).
 module tb_sys;
@@ -22,6 +24,45 @@ reg [63:0] cyc = 64'd0;
 
 always @(posedge refclk) cyc <= cyc + 64'd1;
 
+// fatal stop: the run fails with a RESULT line (run_sys_sim.sh counts a missing RESULT as a failure)
+task fatal(input [8*96-1:0] msg);
+	reg [8*16-1:0] c;
+	begin
+		c = "smoke";
+		if ($value$plusargs("CHAIN=%s", c)) ;
+		$display("FATAL %0s (cycle %0d, t=%0t)", msg, cyc, $time);
+		$display("TB_CYCLES %0d", cyc);
+		$display("RESULT %0s FAIL fatal", c);
+		$finish;
+	end
+endtask
+
+// watchdog of the reference clock, on the board clock of the TB (not on the DUT clock): it must start
+// within 5000 board clocks and never stop for 1000
+integer wd_ticks = 0, wd_stall = 0;
+reg [63:0] wd_last = 64'd0;
+reg wd_started = 1'b0;
+always @(posedge tbclk) begin
+	wd_ticks = wd_ticks + 1;
+	if (cyc != wd_last) begin
+		wd_last = cyc;
+		wd_stall = 0;
+		wd_started = 1'b1;
+	end else begin
+		wd_stall = wd_stall + 1;
+		if (wd_started && wd_stall >= 1000) fatal("watchdog: the reference clock stopped for 1000 board clocks");
+		if (!wd_started && wd_ticks >= 5000) fatal("watchdog: no reference clock within 5000 board clocks");
+	end
+end
+
+// the phase of the reference clock: the ideal clk50 edges lie on a 2.5 ns grid (t0 = a CLK_50MHZ edge,
+// half period 12.5 ns); the offset of V_CLK from it is the delay of the ODDR2 model
+initial begin
+	repeat (10) @(posedge refclk);
+	$display("REFCLK rising edge at %0d ps: %0d ps after the 2.5 ns grid of the ideal clk50 edges (ODDR2 model delay)",
+		$rtoi($realtime * 1000.0), $rtoi($realtime * 1000.0) % 2500);
+end
+
 // events
 integer fev = 0;
 reg [8*32-1:0] last_event = "start";
@@ -37,7 +78,7 @@ endtask
 integer nerr = 0;
 reg xchk_en = 1'b0;
 
-pin_trace #(.OBS_W(OBS_W), .NCNT(NCNT)) trace(.refclk(refclk), .cyc(cyc), .obs(obs), .cnt_sig(cnt_sig),
+pin_trace #(.OBS_W(OBS_W), .NCNT(NCNT), .ZOK(OBS_ZOK)) trace(.refclk(refclk), .cyc(cyc), .obs(obs), .cnt_sig(cnt_sig),
 	.xchk_en(xchk_en));
 frame_capture #(.H_TOTAL(H_TOTAL), .V_TOTAL(V_TOTAL)) frames(.refclk(refclk), .cyc(cyc), .hs(vid_hs),
 	.vs(vid_vs), .rgb(vid_rgb), .last_event(last_event));

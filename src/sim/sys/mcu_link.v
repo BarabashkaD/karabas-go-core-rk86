@@ -6,7 +6,8 @@
 // they keep >= 1.2 ns from the edges of a 40 MHz clock. The RACE monitor reports any edge of SCK, MOSI or
 // a chip select closer than 1 ns to an edge of the reference clock.
 //   frame(cmd, addr, data, rc, ra, rd)   classic frame; rc/ra/rd: the bytes shifted out by the FPGA
-//   burst(type, addr, n)                 burst write of bbuf[0..n-1] (waits for bready = 1 first)
+//   burst(type, addr, n)                 burst write of bbuf[0..n-1] (waits for bready = 1 first, at most
+//                                        100 ms as the firmware; then a fatal stop)
 //   caps_query(ok, caps, max_mhz)        CMD_CAPS {F7, 00, 01}, then up to 16 NOP frames for the answer
 //                                        {F7, caps, max_mhz}; repeated up to 4 times
 module mcu_link #(
@@ -67,9 +68,15 @@ endtask
 
 task burst(input [7:0] btype, input [31:0] addr, input integer n);
 	integer i;
+	realtime t_wait;
 	reg [7:0] dummy;
 	begin
-		if (bready !== 1'b1) wait (bready === 1'b1);
+		// the firmware waits for READY up to 100 ms (then classic frames, not modelled in v1): fail
+		t_wait = $realtime;
+		while (bready !== 1'b1) begin
+			if ($realtime - t_wait >= 100000000.0) tb_sys.fatal("mcu_link: burst READY low for 100 ms");
+			#100;
+		end
 		align;
 		bcs_n = 1'b0;
 		#100;

@@ -2,7 +2,8 @@
 // the firmware) and the chains selected by +CHAIN=<name>:
 //   smoke   prologue + SMOKE_MS (+SMOKE_MS=<ms>, default 5) ms: no X on the observed pins after the
 //           ROM load, no RACE, the CPU reads the ROM (0x10800..0x10FFF) after the loader drops, the VGA
-//           line period, no SRAM write with X after the ROM load, no access above 128K.
+//           line period, no SRAM write with X after the ROM load, no access above 128K, the ROMs in the SRAM
+//           equal to the ROM files.
 
 reg [7:0] rom_biossd [0:4095];
 reg [7:0] rom_bios [0:2047];
@@ -59,6 +60,29 @@ task kbd(input [7:0] mods, input [7:0] code);
 	end
 endtask
 
+// the SRAM holds both ROMs after the load (TB paths only: sram_model memory and the ROM images of the TB)
+integer nrom_bad = 0;
+task rom_compare;
+	integer i;
+	begin
+		nrom_bad = 0;
+		for (i = 0; i < 4096; i = i + 1)
+			if (sram.mem[17'h10000 + i] !== rom_biossd[i]) begin
+				nrom_bad = nrom_bad + 1;
+				if (nrom_bad <= 10) $display("ERROR ROM in SRAM: %05h = %h, BIOSSD.BIN[%03h] = %h", 17'h10000 + i[16:0],
+					sram.mem[17'h10000 + i], i[11:0], rom_biossd[i]);
+			end
+		for (i = 0; i < 2048; i = i + 1)
+			if (sram.mem[17'h11000 + i] !== rom_bios[i]) begin
+				nrom_bad = nrom_bad + 1;
+				if (nrom_bad <= 10) $display("ERROR ROM in SRAM: %05h = %h, BIOS.BIN[%03h] = %h", 17'h11000 + i[16:0],
+					sram.mem[17'h11000 + i], i[11:0], rom_bios[i]);
+			end
+		if (nrom_bad) nerr = nerr + 1;
+		$display("ROM compare: SRAM 10000..117FF against BIOSSD.BIN + BIOS.BIN: %0d bytes differ", nrom_bad);
+	end
+endtask
+
 // the core start sequence of the firmware (karabas-go-firmware docs/protocol.md, section 3: do_configure)
 task prologue;
 	reg [8*8-1:0] s;
@@ -86,13 +110,17 @@ task prologue;
 			link_frame(8'h08, 8'h00, 8'h01);       // CMD_ROMLOADER on
 			romload(0, 32'h00010000, 4096);        // roms/BIOSSD.BIN at 65536 (core.json)
 			romload(1, 32'h00011000, 2048);        // roms/BIOS.BIN at 69632
-			link_frame(8'h08, 8'h00, 8'h00);       // CMD_ROMLOADER off: the CPU leaves reset
 		end
-		rom_done_cyc = cyc;
+		// the checks after the ROM load are armed at the start of the CMD_ROMLOADER off frame: the loader
+		// (and the CPU reset) drops during that frame, and its first read must be the reset vector
 		rom_phase = 1'b1;
 		xchk_en = 1'b1;
 		sram.chk = 1'b1;
+		if (!(s == "preload"))
+			link_frame(8'h08, 8'h00, 8'h00);       // CMD_ROMLOADER off: the CPU leaves reset
+		rom_done_cyc = cyc;
 		mark_event("rom_loaded");
+		rom_compare;
 		switch(8'h04, 8'h00);                      // Text color: 0
 		switch(8'h05, 8'h01);                      // Sound: on
 		switch(8'h06, 8'h00);                      // ROM: 0 (BIOSSD)
@@ -114,7 +142,7 @@ task chain_smoke;
 		mark_event("smoke_end");
 		xcheck_regs("smoke_end", nx);
 		ok = 1;
-		if (nerr) ok = 0;
+		if (nerr) begin ok = 0; $display("SMOKE FAIL: %0d errors (CAPS, ROM compare)", nerr); end
 		if (trace.nxobs) begin ok = 0; $display("SMOKE FAIL: %0d samples with X on the observed pins", trace.nxobs); end
 		if (link.nrace) begin ok = 0; $display("SMOKE FAIL: %0d RACE", link.nrace); end
 		if (sram.nxwr_chk) begin ok = 0; $display("SMOKE FAIL: %0d SRAM writes with X after the ROM load", sram.nxwr_chk); end
@@ -139,6 +167,20 @@ task chain_smoke;
 		$display("RESULT smoke %0s", ok ? "PASS" : "FAIL");
 	end
 endtask
+
+// time limit of the chain (+MAX_MS=<ms>; default: smoke SMOKE_MS + 20 ms, other chains 1000 ms)
+initial begin : chain_limit
+	integer ms_lim, sms;
+	reg [8*16-1:0] c;
+	c = "smoke";
+	if ($value$plusargs("CHAIN=%s", c)) ;
+	sms = 5;
+	if ($value$plusargs("SMOKE_MS=%d", sms)) ;
+	ms_lim = (c == "smoke") ? sms + 20 : 1000;
+	if ($value$plusargs("MAX_MS=%d", ms_lim)) ;
+	#(ms_lim * 1000000.0);
+	fatal("chain time limit (+MAX_MS) reached");
+end
 
 initial begin : chain
 	integer nx;

@@ -2,24 +2,26 @@
 // L0 trace: a hash of the observed vector, sampled on every falling edge of the reference clock.
 // Each bit of obs is classified by a continuous assignment (evaluated only when the bit changes):
 // value ov (X/Z -> 0), mask ox (X or Z -> 1), oxo (X only). When {ov, ox, oxo} differs from the previous
-// sample (any change of a bit between 0, 1, X and Z), the cycle number, then ov (64-bit words), then ox
-// (64-bit words) are folded into h:
-//   h = (h ^ w) * 64'h100000001B3; h = h ^ (h >> 29)      (amendment A1)
+// sample (any change of a bit between 0, 1, X and Z), the cycle number, then ov, ox and oxo (each as
+// 64-bit words) are folded into h:
+//   h = (h ^ w) * 64'h100000001B3; h = h ^ (h >> 29)      (amendment A1; oxo is a third word)
 // (the product is computed as shifts and adds, 0x100000001B3 = 2^40 + 2^8 + 2^7 + 2^5 + 2^4 + 2^1 + 1;
-// the self-test compares it with the multiplication). The run stops if h ever becomes X.
+// the self-test compares it with the multiplication). The run stops (fatal) if h ever becomes X.
 // Every WIN cycles a line goes to simout/trace.txt:
-//   W <window> <first cycle> <hash hex> <changes> <rising edges of cnt_sig[NCNT-1]> ... <cnt_sig[0]>
-// and h restarts from SEED. A self-test at time 0 checks that the hash is never X and changes with
-// every bit of obs (0 -> 1) and of the mask (0 -> X).
-// X-check: while xchk_en = 1, every changed sample with an X bit (Z is accepted: undriven inouts, MD
-// between cycles), and the sample at the rising edge of xchk_en, print "XCHECK OBS ..." (first 20) and
-// count nxobs.
-// Plusargs: +TRACE_FROM=<cycle> +TRACE_TO=<cycle>: every change in the range goes to
-// simout/trace_detail.txt as "<cycle> <ov hex> <ox hex>".
+//   W <window> <first cycle> <hash hex> <changes> <0->1 transitions of cnt_sig[NCNT-1]> ... <cnt_sig[0]>
+// and h restarts from SEED. A self-test at time 0 checks that the hash is never X and changes with every
+// bit of obs for 0 -> 1, 0 -> X and 0 -> Z, with X, Z and 1 all different. At every window the
+// classification is checked against the functions cls_v / cls_x / cls_xo (fatal on a difference).
+// X/Z check: while xchk_en = 1, every changed sample, and the sample at the rising edge of xchk_en, with an
+// X bit or a Z bit outside ZOK (the pins allowed to be Z) prints "XCHECK OBS ..." (first 20) and counts nxobs.
+// Plusargs: +TRACE_FROM=<cycle> [+TRACE_TO=<cycle>, default: the end of the run]: every change in the range
+// goes to simout/trace_detail.txt as "<cycle> <ov hex> <ox hex> <oxo hex>".
+// Fatal stops go through tb_sys.fatal (a RESULT FAIL line).
 module pin_trace #(
 	parameter integer OBS_W = 8,
 	parameter integer NCNT = 1,
-	parameter integer WIN = 4096
+	parameter integer WIN = 4096,
+	parameter [OBS_W-1:0] ZOK = 0
 ) (
 	input refclk,
 	input [63:0] cyc,
@@ -34,8 +36,7 @@ integer ftr = 0, fdet = 0, nxobs = 0, nchg = 0, nwin = 0, k;
 reg [63:0] h = SEED;
 reg [63:0] win_first = 64'd0;
 reg [OBS_W-1:0] pv, px, pxo;
-reg [64*NW-1:0] vv, xx;
-reg [63:0] tr_from = 64'hFFFFFFFFFFFFFFFF, tr_to = 64'd0;
+reg [63:0] tr_from = 64'hFFFFFFFFFFFFFFFF, tr_to = 64'hFFFFFFFFFFFFFFFF;
 reg first = 1'b1, prev_chk = 1'b0;
 reg [31:0] cnt_total [0:NCNT-1];
 reg [31:0] cnt_mark [0:NCNT-1];
@@ -50,6 +51,8 @@ generate
 		assign oxo[g] = obs[g] === 1'bx;
 	end
 endgenerate
+// bits that fail the X/Z check: X anywhere, Z outside ZOK
+wire [OBS_W-1:0] obad = oxo | (ox & ~oxo & ~ZOK);
 
 function [63:0] fold(input [63:0] h0, input [63:0] w);
 	reg [63:0] t;
@@ -68,18 +71,20 @@ function [63:0] fold_mul(input [63:0] h0, input [63:0] w);
 	end
 endfunction
 
-function [63:0] fold_obs(input [63:0] h0, input [63:0] c, input [64*NW-1:0] v, input [64*NW-1:0] x);
+function [63:0] fold_obs(input [63:0] h0, input [63:0] c, input [64*NW-1:0] v, input [64*NW-1:0] x,
+	input [64*NW-1:0] xo);
 	integer i;
 	reg [63:0] t;
 	begin
 		t = fold(h0, c);
 		for (i = 0; i < NW; i = i + 1) t = fold(t, v[64*i +: 64]);
 		for (i = 0; i < NW; i = i + 1) t = fold(t, x[64*i +: 64]);
+		for (i = 0; i < NW; i = i + 1) t = fold(t, xo[64*i +: 64]);
 		fold_obs = t;
 	end
 endfunction
 
-// classification of a test vector (self-test only), the same rules as the continuous assignments
+// the classification rules as functions (self-test and the live check of the continuous assignments)
 function [64*NW-1:0] cls_v(input [OBS_W-1:0] o);
 	integer i;
 	begin
@@ -94,12 +99,23 @@ function [64*NW-1:0] cls_x(input [OBS_W-1:0] o);
 		for (i = 0; i < OBS_W; i = i + 1) cls_x[i] = o[i] !== 1'b0 && o[i] !== 1'b1;
 	end
 endfunction
+function [64*NW-1:0] cls_xo(input [OBS_W-1:0] o);
+	integer i;
+	begin
+		cls_xo = 0;
+		for (i = 0; i < OBS_W; i = i + 1) cls_xo[i] = o[i] === 1'bx;
+	end
+endfunction
+
+function [63:0] hash_of(input [63:0] c, input [OBS_W-1:0] o);
+	hash_of = fold_obs(SEED, c, cls_v(o), cls_x(o), cls_xo(o));
+endfunction
 
 // self-test (A1)
 task selftest;
 	integer i, bad, seed;
 	reg [OBS_W-1:0] o;
-	reg [63:0] base, h1, hx, hc, a, b;
+	reg [63:0] base, h1, hx, hz, hc, a, b;
 	begin
 		bad = 0;
 		seed = 7;
@@ -110,24 +126,26 @@ task selftest;
 		end
 		if (bad) $display("PIN_TRACE selftest: shift-add fold differs from the multiplication in %0d of 1000 cases", bad);
 		o = 0;
-		base = fold_obs(SEED, 64'd0, cls_v(o), cls_x(o));
-		hc = fold_obs(SEED, 64'd1, cls_v(o), cls_x(o));
+		base = hash_of(64'd0, o);
+		hc = hash_of(64'd1, o);
 		if (^base === 1'bx || ^hc === 1'bx || hc == base) bad = bad + 1;
 		for (i = 0; i < OBS_W; i = i + 1) begin
 			o = 0; o[i] = 1'b1;
-			h1 = fold_obs(SEED, 64'd0, cls_v(o), cls_x(o));
+			h1 = hash_of(64'd0, o);
 			o[i] = 1'bx;
-			hx = fold_obs(SEED, 64'd0, cls_v(o), cls_x(o));
-			if (^h1 === 1'bx || ^hx === 1'bx || h1 == base || hx == base || hx == h1) begin
+			hx = hash_of(64'd0, o);
+			o[i] = 1'bz;
+			hz = hash_of(64'd0, o);
+			if (^h1 === 1'bx || ^hx === 1'bx || ^hz === 1'bx || h1 == base || hx == base || hz == base ||
+				hx == h1 || hz == h1 || hz == hx) begin
 				bad = bad + 1;
-				if (bad <= 5) $display("PIN_TRACE selftest: bit %0d: base %h, 1 -> %h, X -> %h", i, base, h1, hx);
+				if (bad <= 5) $display("PIN_TRACE selftest: bit %0d: base %h, 1 -> %h, X -> %h, Z -> %h", i, base, h1, hx, hz);
 			end
 		end
-		if (bad) begin
-			$display("FATAL PIN_TRACE selftest failed: %0d cases", bad);
-			$finish;
-		end else
-			$display("PIN_TRACE selftest OK: fold = multiplication (1000 cases); %0d bits, each bit of obs and of the mask changes the hash",
+		if (bad)
+			tb_sys.fatal("PIN_TRACE selftest failed");
+		else
+			$display("PIN_TRACE selftest OK: fold = multiplication (1000 cases); %0d bits, 0 -> 1 / X / Z each change the hash, all different",
 				OBS_W);
 	end
 endtask
@@ -155,46 +173,56 @@ task finish;
 	end
 endtask
 
+// 0 -> 1 transitions of the counted pins (X -> 1 is not counted)
 generate
 	for (g = 0; g < NCNT; g = g + 1) begin : counters
-		initial begin cnt_total[g] = 0; cnt_mark[g] = 0; end
-		always @(posedge cnt_sig[g]) cnt_total[g] = cnt_total[g] + 1;
+		reg prev_c;
+		initial begin cnt_total[g] = 0; cnt_mark[g] = 0; prev_c = 1'bx; end
+		always @(cnt_sig[g]) begin
+			if (prev_c === 1'b0 && cnt_sig[g] === 1'b1) cnt_total[g] = cnt_total[g] + 1;
+			prev_c = cnt_sig[g];
+		end
 	end
 endgenerate
 
 initial begin
 	selftest;
 	ftr = $fopen("simout/trace.txt", "w");
-	if ($value$plusargs("TRACE_FROM=%d", tr_from) | $value$plusargs("TRACE_TO=%d", tr_to))
+	if ($value$plusargs("TRACE_FROM=%d", tr_from)) begin
+		if (!$value$plusargs("TRACE_TO=%d", tr_to)) tr_to = 64'hFFFFFFFFFFFFFFFF;    // to the end of the run
 		fdet = $fopen("simout/trace_detail.txt", "w");
+	end else if ($value$plusargs("TRACE_TO=%d", tr_to)) begin
+		tr_from = 64'd0;
+		fdet = $fopen("simout/trace_detail.txt", "w");
+	end
 end
 
 always @(negedge refclk) begin
 	if (cyc >= win_first + WIN) begin    // windows of WIN cycles from cycle 0
 		write_window;
 		win_first = win_first + WIN;
+		// live check of the continuous classification against the functions
+		if (ov !== cls_v(obs) || ox !== cls_x(obs) || oxo !== cls_xo(obs))
+			tb_sys.fatal("PIN_TRACE: the classification of obs differs from cls_v / cls_x / cls_xo");
 	end
 	if (first || ov !== pv || ox !== px || oxo !== pxo) begin
-		vv = ov;
-		xx = ox;
-		h = fold_obs(h, cyc, vv, xx);
-		if (^h === 1'bx) begin
-			$display("FATAL PIN_TRACE hash is X at cycle %0d", cyc);
-			$finish;
-		end
+		h = fold_obs(h, cyc, ov, ox, oxo);
+		if (^h === 1'bx) tb_sys.fatal("PIN_TRACE: the hash is X");
 		nchg = nchg + 1;
-		if (fdet && cyc >= tr_from && cyc <= tr_to) $fwrite(fdet, "%0d %h %h\n", cyc, ov, ox);
-		if (xchk_en && |oxo) begin
+		if (fdet && cyc >= tr_from && cyc <= tr_to) $fwrite(fdet, "%0d %h %h %h\n", cyc, ov, ox, oxo);
+		if (xchk_en && |obad) begin
 			nxobs = nxobs + 1;
-			if (nxobs <= 20) $display("XCHECK OBS cycle %0d: X bits %h (t=%0t)", cyc, oxo, $time);
+			if (nxobs <= 20) $display("XCHECK OBS cycle %0d: X bits %h, Z bits not allowed %h (t=%0t)", cyc, oxo,
+				obad & ~oxo, $time);
 		end
 		pv = ov;
 		px = ox;
 		pxo = oxo;
 		first = 1'b0;
-	end else if (xchk_en && !prev_chk && |oxo) begin
+	end else if (xchk_en && !prev_chk && |obad) begin
 		nxobs = nxobs + 1;
-		if (nxobs <= 20) $display("XCHECK OBS cycle %0d: X bits %h (t=%0t)", cyc, oxo, $time);
+		if (nxobs <= 20) $display("XCHECK OBS cycle %0d: X bits %h, Z bits not allowed %h (t=%0t)", cyc, oxo,
+			obad & ~oxo, $time);
 	end
 	prev_chk = xchk_en;
 end

@@ -7,7 +7,8 @@
 // its X/Z mask, folded as in pin_trace.v; at the end of the frame its length and line count.
 // simout/frames.txt: "F <frame> <start cycle> <cycles> <lines> <hash hex> <last event> [snap <name>]".
 //   snap(name)   blocks until the first complete frame that started at least SNAP_DELAY cycles after
-//                the call (24 ms: one CRT frame) has ended; that frame is tagged with the name
+//                the call (24 ms: one CRT frame) has ended; that frame is tagged with the name; a fatal
+//                stop if it has not ended 4 VGA frames after that
 module frame_capture #(
 	parameter integer H_TOTAL = 1057,
 	parameter integer V_TOTAL = 629,
@@ -27,7 +28,7 @@ reg seen_hs = 1'b0, seen_vs = 1'b0, phs = 1'b0, pvs = 1'b0;
 reg [63:0] fh = SEED, fstart = 64'd0;
 reg [23:0] prgb = 24'd0;
 reg snap_pending = 1'b0, snap_done = 1'b0;
-reg [63:0] snap_after = 64'd0;
+reg [63:0] snap_after = 64'd0, snap_limit = 64'd0;
 reg [8*32-1:0] snap_name;
 
 // colour value (X/Z -> 0) and X/Z mask, by continuous assignments
@@ -105,7 +106,9 @@ task snap(input [8*32-1:0] name);
 		snap_after = cyc + SNAP_DELAY;
 		snap_done = 1'b0;
 		snap_pending = 1'b1;
-		wait (snap_done);
+		snap_limit = snap_after + 4 * H_TOTAL * V_TOTAL;    // the frame must end within 4 VGA frames
+		wait (snap_done || cyc >= snap_limit);
+		if (!snap_done) tb_sys.fatal("frame_capture: snap without a complete frame within 24 ms + 4 VGA frames");
 	end
 endtask
 

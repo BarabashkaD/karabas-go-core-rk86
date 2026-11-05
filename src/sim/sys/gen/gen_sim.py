@@ -72,6 +72,10 @@ COLL_DECL = ('C_SIM_COLLISION_CHECK("ALL") -> ("NONE"); in the behavioural model
              'the write mode and are never forced to X by a collision. The warnings "blk_mem_gen_v7_3 collision '
              'detected" come from the async_coll block (C_COMMON_CLK = 0, C_DISABLE_WARN_BHV_COLL = 0), print only, '
              'and are kept: they mark reads whose data is undefined on the hardware (WRITE_FIRST on the other port)')
+# the reference clock of the Go TB (board_go.vh)
+REFCLK_GO = ('V_CLK, the ODDR2 output of clk50 (radio86rk.v ODDR2_inst, D0 = 1, D1 = 0); the unisims_ver model ODDR2.v '
+             'has the path delay C0 => Q = C1 => Q = 100 ps (specify block), so V_CLK follows clk50 by 100 ps; the TB '
+             'samples on its falling edge; sim.log REFCLK gives the offset measured in the run')
 # the system TB (src/sim/sys/); the includes board_*.vh and chain.vh are copied next to them
 TB_FILES = ('tb_sys.v', 'sram_model.v', 'mcu_link.v', 'pin_trace.v', 'frame_capture.v')
 # top nets wired to mcu outputs but declared reg (#2)
@@ -879,8 +883,10 @@ def main():
             roms.append('roms/%s.hex: %s, %d bytes' % (os.path.splitext(f)[0], f, n))
     write(os.path.join(out, 'run_sys_sim.sh'), read(os.path.join(sysdir, 'run_sys_sim.sh')))
     write(os.path.join(out, 'sim.prj'), '\n'.join(prj_lines) + '\n')
-    write(os.path.join(out, 'sim.env'), 'BOARD=%s\nDEFINE=BOARD_%s\nTB_TOP=%s\nDUT_TOP=%s\n'
-          % (a.board, a.board.upper(), a.tb_top, top))
+    # TB_RESULT=required: the system TB prints a RESULT line, a run without one fails (run_sys_sim.sh);
+    # none: a TB given with --tb (the stub)
+    write(os.path.join(out, 'sim.env'), 'BOARD=%s\nDEFINE=BOARD_%s\nTB_TOP=%s\nDUT_TOP=%s\nTB_RESULT=%s\n'
+          % (a.board, a.board.upper(), a.tb_top, top, 'none' if a.tb else 'required'))
 
     # ---- journal and summary
     write(os.path.join(out, 'subst.txt'),
@@ -900,6 +906,9 @@ def main():
     sm.append('  #F13 %s' % F13)
     sm += ['  #U %s' % x for x in undriven]
     sm.append('')
+    if a.board == 'go':
+        sm.append('REFERENCE CLOCK: %s' % REFCLK_GO)
+        sm.append('')
     sm.append('SOURCE OF THE TABLES: %s' % POWER_UP_SOURCE)
     sm.append('')
     sm.append('POWER-UP (A3: where each row of %s landed)' % rel(pu_path, tbd).replace('\\', '/'))

@@ -15,6 +15,7 @@ localparam integer V_TOTAL = 629;
 
 reg CLK_50MHZ = 1'b0;
 always #10 CLK_50MHZ = ~CLK_50MHZ;
+wire tbclk = CLK_50MHZ;                     // the TB's own clock (watchdog of the reference clock)
 
 wire UART_RX, UART_TX, UART_CTS, ESP_RESET_N, ESP_BOOT_N;
 wire [20:0] MA;
@@ -94,21 +95,49 @@ wire [23:0] vid_rgb = {VGA_R, VGA_G, VGA_B};
 // clocks V_CLK (the reference clock) and MIDI_CLK (counted below). MCU_MISO only while MCU_CS_N = 0
 // (otherwise it depends on unconnected mcu inputs, 'U' in RTL). Undriven inouts are Z.
 localparam integer OBS_W = 167;
-wire [OBS_W-1:0] obs = {
-	MA, MD, MWR_N, MRD_N,                                                     // 41
-	VGA_R, VGA_G, VGA_B, VGA_HS, VGA_VS,                                      // 26
-	BEEPER, TAPE_OUT, DAC_DAT, DAC_BCK, DAC_LRCK, DAC_MUTE,                   // 6
-	SD_CS_N, SD_CLK, SD_DI,                                                   // 3
-	(MCU_CS_N ? 1'b0 : MCU_MISO), MCU_MOSI, MCU_IO,                           // 6
-	UART_RX, UART_TX, UART_CTS, ESP_RESET_N, ESP_BOOT_N,                      // 5
-	SDR_BA, SDR_A, SDR_CLK, SDR_DQM, SDR_WE_N, SDR_CAS_N, SDR_RAS_N, SDR_DQ,  // 37
-	FT_SPI_CS_N, FT_SPI_SCK, FT_SPI_MOSI, FT_OE_N,                            // 4
-	WA, WCS_N, WRD_N, WWR_N, WRESET_N, WD,                                    // 24
-	FDC_DRIVE, FDC_MOTOR, FDC_DIR, FDC_STEP, FDC_WDATA, FDC_WGATE, FDC_SIDE_N, // 8
-	MIDI_TX, MIDI_RESET_N,                                                    // 2
-	FLASH_CS_N, FLASH_DI, FLASH_SCK, FLASH_WP_N, FLASH_HOLD_N                 // 5
-};
-// counted pins (rising edges per trace window): MIDI_CLK (clk12 through ODDR2; its rising edges
+`define GO_OBS { \
+	MA, MD, MWR_N, MRD_N,                                                     /* 41 */ \
+	VGA_R, VGA_G, VGA_B, VGA_HS, VGA_VS,                                      /* 26 */ \
+	BEEPER, TAPE_OUT, DAC_DAT, DAC_BCK, DAC_LRCK, DAC_MUTE,                   /* 6 */ \
+	SD_CS_N, SD_CLK, SD_DI,                                                   /* 3 */ \
+	(MCU_CS_N ? 1'b0 : MCU_MISO), MCU_MOSI, MCU_IO,                           /* 6 */ \
+	UART_RX, UART_TX, UART_CTS, ESP_RESET_N, ESP_BOOT_N,                      /* 5 */ \
+	SDR_BA, SDR_A, SDR_CLK, SDR_DQM, SDR_WE_N, SDR_CAS_N, SDR_RAS_N, SDR_DQ,  /* 37 */ \
+	FT_SPI_CS_N, FT_SPI_SCK, FT_SPI_MOSI, FT_OE_N,                            /* 4 */ \
+	WA, WCS_N, WRD_N, WWR_N, WRESET_N, WD,                                    /* 24 */ \
+	FDC_DRIVE, FDC_MOTOR, FDC_DIR, FDC_STEP, FDC_WDATA, FDC_WGATE, FDC_SIDE_N, /* 8 */ \
+	MIDI_TX, MIDI_RESET_N,                                                    /* 2 */ \
+	FLASH_CS_N, FLASH_DI, FLASH_SCK, FLASH_WP_N, FLASH_HOLD_N                 /* 5 */ \
+}
+// pins allowed to be Z (the X/Z check of the pins fails on Z anywhere else), in the order of GO_OBS:
+// MD (MD[7:0] between memory cycles, MD[15:8] undriven), the undriven inouts UART_RX, UART_TX, SDR_DQ, WD
+// and MCU_IO[3:2] (radio86rk.v: MCU_IO[3:1] = z; MCU_IO[1] is driven by the TB)
+`define GO_ZOK { \
+	21'b0, 16'hFFFF, 2'b0, 2'b0, \
+	24'b0, 1'b0, 1'b0, \
+	6'b0, \
+	3'b0, \
+	1'b0, 1'b0, 4'b1100, \
+	1'b1, 1'b1, 1'b0, 1'b0, 1'b0, \
+	2'b0, 13'b0, 1'b0, 2'b0, 1'b0, 1'b0, 1'b0, 16'hFFFF, \
+	4'b0, \
+	3'b0, 2'b0, 1'b0, 1'b0, 1'b0, 16'hFFFF, \
+	2'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, \
+	2'b0, \
+	5'b0 \
+}
+wire [OBS_W-1:0] obs = `GO_OBS;
+localparam [OBS_W-1:0] OBS_ZOK = `GO_ZOK;
+// width guard: {1'b1, list} must be exactly OBS_W + 1 bits (the leading 1 at bit OBS_W, zeros above it)
+wire [2*OBS_W+1:0] obs_guard = {1'b1, `GO_OBS};
+localparam [2*OBS_W+1:0] ZOK_GUARD = {1'b1, `GO_ZOK};
+initial begin
+	#1;
+	if (obs_guard[OBS_W] !== 1'b1 || obs_guard[2*OBS_W+1:OBS_W+1] !== 0)
+		fatal("board_go.vh: the observed vector is not OBS_W bits wide");
+	if (ZOK_GUARD[OBS_W] !== 1'b1 || ZOK_GUARD[2*OBS_W+1:OBS_W+1] !== 0)
+		fatal("board_go.vh: the Z mask is not OBS_W bits wide");
+end// counted pins (0 -> 1 transitions per trace window): MIDI_CLK (clk12 through ODDR2; its rising edges
 // fall on rising edges of clk50, never on the sampling edge) and DAC_MUTE (amendment A8)
 localparam integer NCNT = 2;
 wire [NCNT-1:0] cnt_sig = {MIDI_CLK, DAC_MUTE};
