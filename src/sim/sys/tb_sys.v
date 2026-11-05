@@ -38,23 +38,17 @@ task fatal(input [8*96-1:0] msg);
 endtask
 
 // watchdog of the reference clock, on the board clock of the TB (not on the DUT clock): it must start
-// within 5000 board clocks and never stop for 1000
-integer wd_ticks = 0, wd_stall = 0;
+// within 5000 board clocks, and it must advance in every interval of 1000 board clocks
 reg [63:0] wd_last = 64'd0;
-reg wd_started = 1'b0;
-always @(posedge tbclk) begin
-	wd_ticks = wd_ticks + 1;
-	if (cyc != wd_last) begin
+initial begin
+	repeat (5000) @(posedge tbclk);
+	if (cyc == 64'd0) fatal("watchdog: no reference clock within 5000 board clocks");
+	forever begin
 		wd_last = cyc;
-		wd_stall = 0;
-		wd_started = 1'b1;
-	end else begin
-		wd_stall = wd_stall + 1;
-		if (wd_started && wd_stall >= 1000) fatal("watchdog: the reference clock stopped for 1000 board clocks");
-		if (!wd_started && wd_ticks >= 5000) fatal("watchdog: no reference clock within 5000 board clocks");
+		repeat (1000) @(posedge tbclk);
+		if (cyc == wd_last) fatal("watchdog: the reference clock stopped for 1000 board clocks");
 	end
 end
-
 // the phase of the reference clock: the ideal clk50 edges lie on a 2.5 ns grid (t0 = a CLK_50MHZ edge,
 // half period 12.5 ns); the offset of V_CLK from it is the delay of the ODDR2 model
 initial begin

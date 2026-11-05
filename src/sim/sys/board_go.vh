@@ -129,10 +129,11 @@ localparam integer OBS_W = 167;
 wire [OBS_W-1:0] obs = `GO_OBS;
 localparam [OBS_W-1:0] OBS_ZOK = `GO_ZOK;
 // width guard: {1'b1, list} must be exactly OBS_W + 1 bits (the leading 1 at bit OBS_W, zeros above it)
-wire [2*OBS_W+1:0] obs_guard = {1'b1, `GO_OBS};
 localparam [2*OBS_W+1:0] ZOK_GUARD = {1'b1, `GO_ZOK};
+reg [2*OBS_W+1:0] obs_guard;
 initial begin
 	#1;
+	obs_guard = {1'b1, `GO_OBS};
 	if (obs_guard[OBS_W] !== 1'b1 || obs_guard[2*OBS_W+1:OBS_W+1] !== 0)
 		fatal("board_go.vh: the observed vector is not OBS_W bits wide");
 	if (ZOK_GUARD[OBS_W] !== 1'b1 || ZOK_GUARD[2*OBS_W+1:OBS_W+1] !== 0)
