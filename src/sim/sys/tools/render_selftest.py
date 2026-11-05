@@ -10,12 +10,16 @@ one change, then tools/render.py runs on it:
   dy       snaps.txt: every line number of the snap prompt + 1 (the picture one line lower)  -> FAIL
   font     FONT.BIN: glyph 72h ('r' of the banner), glyph line 3 inverted (6 dots)   -> FAIL
   cursor   ram_prompt.hex: the cursor column [7602h] + 1                   -> FAIL
-<dir>/selftest.txt lists the cases and the last lines of their render.txt; the last line is
-"RENDER SELFTEST PASS|FAIL" (exit status 0 / 1).
+A negative case passes only with its own reason line (the snap and kind of failure listed above: dots
+differ in prompt / attr, the render offset dy 1, the cursor at the new column), "RENDER FAIL" as the last
+line of render.py and no Traceback; the control needs "RENDER PASS" last and no FAIL line. A crash of
+render.py is a selftest failure. <dir>/selftest.txt lists the cases, their reason lines and last lines; its
+last line is "RENDER SELFTEST PASS|FAIL" (exit status 0 / 1).
 """
 import argparse
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -52,9 +56,11 @@ def main():
         font = os.path.join(d, 'FONT.BIN')
         shutil.copyfile(a.font, font)
         what = 'no change'
+        reason = None
         if c == 'ram':
             old = edit_hex(os.path.join(d, 'ram_prompt.hex'), 0x7811, lambda v: 0x58)
             what = 'ram_prompt.hex [7811] %02X -> 58' % old
+            reason = r'^RENDER prompt: frame \d+ .*: [1-9]\d* dots differ'
         elif c == 'attr':
             p = os.path.join(d, 'ram_attr.hex')
             lines = open(p).read().split('\n')
@@ -62,7 +68,9 @@ def main():
             k = next(i for i in range(row, row + COLS) if lines[i].strip().lower() == '90')
             edit_hex(p, k, lambda v: 0x80)
             what = 'ram_attr.hex [%04X] (row 28 column %d) 90 -> 80' % (k, k - row)
+            reason = r'^RENDER attr: frame \d+ .*: [1-9]\d* dots differ'
         elif c == 'dy':
+            reason = r'^RENDER prompt: FAIL render offset: .*\(dx 0, dy 1;'
             p = os.path.join(d, 'snaps.txt')
             out, cur = [], None
             for ln in open(p):
@@ -82,19 +90,39 @@ def main():
             b[0x72 * 8 + 3] ^= 0x3F
             open(font, 'wb').write(bytes(b))
             what = 'FONT.BIN glyph 72h line 3 ^ 3Fh'
+            # the banner 'r' is in the snap prompt (bounding box moves) and in attr (dots differ)
+            reason = r'^RENDER (prompt: FAIL render offset|attr: frame \d+ .*: [1-9]\d* dots differ)'
         elif c == 'cursor':
             old = edit_hex(os.path.join(d, 'ram_prompt.hex'), 0x7602, lambda v: v + 1)
             what = 'ram_prompt.hex [7602] %02X -> %02X' % (old, old + 1)
+            reason = r'^RENDER prompt: frame \d+ .*: [1-9]\d* dots differ;.* cursor column %d row ' % (old + 1)
         p = subprocess.run([sys.executable, '-B', os.path.join(HERE, 'render.py'), d, '--font', font],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         text = p.stdout.decode('utf-8', 'replace').strip().splitlines()
         want = 0 if c == 'control' else 1
-        good = p.returncode == want
+        # each case must fail for its own reason: its reason line, "RENDER FAIL" as the last line, no
+        # traceback (a crash of render.py is a selftest failure, not a detected change)
+        hit = [ln for ln in text if reason and re.search(reason, ln)]
+        last = text[-1] if text else ''
+        why = []
+        if p.returncode != want:
+            why.append('exit %d, expected %d' % (p.returncode, want))
+        if any('Traceback' in ln for ln in text):
+            why.append('render.py crashed (Traceback)')
+        if last != ('RENDER PASS' if c == 'control' else 'RENDER FAIL'):
+            why.append('last line %r' % last)
+        if c == 'control':
+            hit = [ln for ln in text if 'FAIL' in ln]
+            if hit:
+                why.append('FAIL lines in the control')
+        elif not hit:
+            why.append('no reason line /%s/' % reason)
+        good = not why
         ok_all = ok_all and good
-        key = [ln for ln in text if ('dots differ' in ln or 'FAIL' in ln) and not ln.startswith('READ PATH')][:3]
         report.append('%-8s %-50s render exit %d (expected %d) %s' % (c, what, p.returncode, want,
-                                                                     'ok' if good else 'WRONG'))
-        report += ['           %s' % ln for ln in key]
+                                                                     'ok' if good else 'WRONG: ' + '; '.join(why)))
+        report += ['           %s: %s' % ('FAIL line' if c == 'control' else 'reason', ln) for ln in hit[:2]]
+        report.append('           last line: %s' % last)
     report.append('RENDER SELFTEST %s' % ('PASS' if ok_all else 'FAIL'))
     for ln in report:
         print(ln)

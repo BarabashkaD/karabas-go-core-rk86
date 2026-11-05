@@ -21,15 +21,19 @@ Usage:
                 (signal@first-candidate, or the bare signal for power-up rows) <TAB> modules; for an X-check
                 row the modules '-' drop it for this comparison (listed in summary.txt). An X-check row whose
                 netlist boards include the board must hit exactly once; the RTL hierarchy only adds rows.
+                A map id that matches no row of the table stops the generator (a stale or misspelt map).
   --syr         the .syr of the compared revision: every power-up row is matched with its FSMs by instance
                 prefix + signal (the instance paths of the module of the row under the top): a row with an fsm
                 field must equal its FSM, a row on an FSM register without an fsm field is POWER-UP DIFFERS.
+                Its sha256 and folder go into summary.txt; <syr folder>/<top>.bin must equal <rev>/src/<top>.bin
+                (the .syr belongs to the revision), else the generator stops; a missing bin is UNVERIFIED.
   --compare     a comparison run (tools/compare_runs.py): --syr is mandatory, POWER-UP DIFFERS / UNCOMPARED
                 stop the generator (exit 2) after summary.txt is written.
   --peer-rev    the export of the other revision: its RTL hashes go into summary.txt; byte-identical RTL stops
                 the generator unless --self-compare (A2).
   --seed        a seeded change of the calibration on this side only (A2): opos_restart (k580wg75.v, timing),
-                rom_banner (roms/BIOSSD.hex FF5B, data). Listed under SEEDED CHANGES in summary.txt.
+                rom_banner (roms/BIOSSD.hex FF5B, data), cce_delay (rk86_machine.v, vid_cce one clk later,
+                timing). Listed under SEEDED CHANGES in summary.txt.
   The out_dir is cleaned (everything except <rev_dir>) before it is written.
 
 Every change of an RTL file is a declared substitution with an exact count check (subst.py);
@@ -444,6 +448,8 @@ SEEDS = {
                     "every character column one cce earlier)",
     'rom_banner': "roms/BIOSSD.hex: the byte at FF5B of the loaded ROM (BIOSSD.BIN offset F5Bh, the first "
                   "letter of the banner, 72h 'r') -> 52h 'R' (one byte of data)",
+    'cce_delay': "rk86_machine.v: vid_cce = cce -> one extra register (cce delayed by 1 clk, power-up 0) in front of "
+                 "the DMA and the CRT (timing: 1 clk of the 40 MHz clock on the DMA / CRT clock enable)",
 }
 
 
@@ -509,6 +515,29 @@ def main():
     top = board['top']
     j = subst.Journal()
     checks = []
+    # the .syr must belong to the revision: <syr dir>/<top>.bin (the bitstream of that build) equals
+    # <rev>/src/<top>.bin (the committed bitstream of the revision); a missing bin leaves it UNVERIFIED
+    syr_line = None
+    if a.syr:
+        syr = os.path.abspath(a.syr)
+        if not os.path.isfile(syr):
+            die('--syr %s: no such file' % a.syr)
+        syr_dir = os.path.dirname(syr)
+        p = syr_dir.replace(os.sep, '/')
+        # shown relative to build/ (no host path in the summary); outside build/ its last two components
+        syr_dir_shown = p.split('/build/')[-1] if '/build/' in p else '/'.join(p.split('/')[-2:])
+        bin_syr, bin_rev = os.path.join(syr_dir, top + '.bin'), os.path.join(rev, 'src', top + '.bin')
+        if os.path.isfile(bin_syr) and os.path.isfile(bin_rev):
+            hs, hr = sha256(bin_syr), sha256(bin_rev)
+            if hs != hr:
+                die('--syr %s: %s/%s.bin (sha256 %s) is not the bitstream of the revision, src/%s.bin (sha256 %s): '
+                    'the .syr belongs to another build' % (a.syr, syr_dir_shown, top, hs, top, hr))
+            binv = 'VERIFIED: %s.bin of the .syr folder = src/%s.bin of the revision (sha256 %s)' % (top, top, hs)
+        else:
+            binv = 'UNVERIFIED: %s missing' % ' and '.join(
+                x for x, p in (('%s.bin of the .syr folder' % top, bin_syr), ('src/%s.bin of the revision' % top,
+                                                                              bin_rev)) if not os.path.isfile(p))
+        syr_line = '  --syr sha256 %s, folder %s; %s' % (sha256(syr), syr_dir_shown, binv)
 
     # ---- the project of the revision
     prj = os.path.join(rev, 'src', top + '.prj')
@@ -648,6 +677,12 @@ def main():
         s.text = j.sub('S1', s.key, s.text, r"\bopos <= \{2'b0,maxx\[6:1\]\}\+8'hD0;",
                        "opos <= {2'b0,maxx[6:1]}+8'hD1; // SEEDED CHANGE opos_restart (A2)", 1,
                        'SEEDED CHANGE opos_restart: ' + SEEDS['opos_restart'], kind='seed')
+    if 'cce_delay' in seeds:
+        s = need('rk86_machine')
+        s.text = j.sub('S3', s.key, s.text, r'\bwire vid_cce = cce;',
+                       "reg vid_cce_d = 1'b0; always @(posedge clk) vid_cce_d <= cce; "
+                       "wire vid_cce = vid_cce_d; // SEEDED CHANGE cce_delay (A2)", 1,
+                       'SEEDED CHANGE cce_delay: ' + SEEDS['cce_delay'], kind='seed')
 
     # ---- #7 HDMI I_FREQ literal width
     s = need(top)
@@ -770,10 +805,14 @@ def main():
     fsm_rows = set()   # (instance prefix, signal) of the power-up rows that landed on a register
     vhdl_init = {}     # unit -> [(decl, value)]
     v_init = {}        # unit -> [(sig, value)]
+    used_ov = set()     # the map ids that matched a row of the table
     for r in pu_rows:
         sig, value = r['signal'], r['value']
         base = [x.strip() for x in r['modules'].split(',') if x.strip()]
-        ov = override.get(row_key(sig, base), override.get(sig))
+        ov_key = row_key(sig, base) if row_key(sig, base) in override else sig
+        ov = override.get(ov_key)
+        if ov is not None:
+            used_ov.add(ov_key)
         cands = [x.strip() for x in (ov or r['modules']).split(',') if x.strip()]
         hits = []
         for c in cands:
@@ -847,6 +886,10 @@ def main():
         else:
             vhdl_init.setdefault(u.name.lower(), (u, []))[1].append((d, value))
         placed.append('%s -> %s = %s (%s)' % (sig, where, value, r.get('source', '')))
+    unused = sorted(set(override) - used_ov)
+    if unused:
+        die('--power-up-map %s: %d map ids match no row of %s (a stale or misspelt map): %s'
+            % (a.power_up_map, len(unused), os.path.basename(pu_path), ', '.join(unused)))
     fsm_free = []
     if syr_fsms is not None:
         for f in syr_fsms:
@@ -903,6 +946,10 @@ def main():
         return ('\tif (^(%s) === 1\'bx) begin $display("XCHECK %%m.%s = %%b", %s); '
                 'sim_ctl.xcount = sim_ctl.xcount + 1; end' % (expr, label, expr))
 
+    unused = sorted(set(xover) - set(r['id'] for r in xrows))
+    if unused:
+        die('--xcheck-map %s: %d map ids match no row of %s (a stale or misspelt map): %s'
+            % (a.xcheck_map, len(unused), os.path.basename(xc_path), ', '.join(unused)))
     for r in xrows:
         reg = r['register']
         ov = xover.get(r['id'])
@@ -1158,6 +1205,8 @@ def main():
               'prefix + signal: a row with an fsm field must equal its FSM, a row on an FSM register needs an fsm '
               'field)')
     sm.append('  --syr: %s' % (os.path.basename(a.syr) if a.syr else 'none (the fsm rows are UNCOMPARED)'))
+    if syr_line:
+        sm.append(syr_line)
     sm += ['  ' + x for x in fsm_checks] or ['  (no fsm rows)']
     sm += ['  ' + x for x in fsm_free]
     sm.append('')
