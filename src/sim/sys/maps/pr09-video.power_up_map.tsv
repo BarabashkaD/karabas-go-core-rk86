@@ -1,0 +1,11 @@
+# Power-up map of PR09 (branch video, cb1c70b: the native video of rk_video moved into rk86_video, instance
+# native of rk_video). gen_sim --power-up-map: row id (signal@first candidate of power_up.tsv) -> candidate
+# modules. The registers of the CRT timebase and the dot shift register are declared in rk86_video after the
+# split (h_cnt, v_cnt as output reg), in rk_video before it; v_cnt2, v_cnt_line, the framebuffer and the VGA
+# registers stay in rk_video. Exactly one candidate declares each register in either revision.
+signal	modules
+state@rk_video	rk_video,rk86_video
+h_cnt@rk_video	rk_video,rk86_video
+v_cnt@rk_video	rk_video,rk86_video
+d_cnt@rk_video	rk_video,rk86_video
+data@rk_video	rk_video,rk86_video

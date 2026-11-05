@@ -181,6 +181,7 @@ def _verilog_decls(u, body, base):
                 if im.group(2).strip():
                     d.kind = 'mem'
                     d.dims = re.findall(r'\[\s*(\d+)\s*:\s*(\d+)\s*\]', im.group(2))
+                    d.dims_raw = re.findall(r'\[([^\]]+)\]', im.group(2))   # also parametric bounds
                 u.regs[d.name] = d
             off += len(item) + 1
     # port directions (ANSI lists and body declarations)

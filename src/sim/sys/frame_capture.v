@@ -8,7 +8,9 @@
 // simout/frames.txt: "F <frame> <start cycle> <cycles> <lines> <hash hex> <last event> [snap <name>]".
 //   snap(name)   blocks until the first complete frame that started at least SNAP_DELAY cycles after
 //                the call (24 ms: one CRT frame) has ended; that frame is tagged with the name; a fatal
-//                stop if it has not ended 4 VGA frames after that
+//                stop if it has not ended 4 VGA frames after that; snap_hash is its hash
+//   snap_d(name, delay)  the same with another delay (cycles; >= 1: the frame must start after the call)
+// last_hash / nframes: the hash and the count of the frames ended so far (the TB waits on them)
 // simout/snaps.txt: the pixels of every snapped frame, for tools/render.py:
 //   "SNAP <name> <frame> <start cycle>", then "<line> <x> <rgb hex>" on the first sample and on every
 //   change of rgb (line: rising edges of hs since the rising edge of vs, from 0; x: samples since the
@@ -34,6 +36,7 @@ reg [23:0] prgb = 24'd0;
 reg snap_pending = 1'b0, snap_done = 1'b0;
 reg [63:0] snap_after = 64'd0, snap_limit = 64'd0;
 reg [8*32-1:0] snap_name;
+reg [63:0] last_hash = 64'd0, snap_hash = 64'd0;
 
 // colour value (X/Z -> 0) and X/Z mask, by continuous assignments
 wire [23:0] cv, cx;
@@ -95,10 +98,12 @@ always @(negedge refclk) begin
 			if (snap_pending && fstart >= snap_after) begin
 				$fwrite(ffr, " snap %0s", snap_name);
 				$display("SNAP %0s: frame %0d, start cycle %0d, hash %h", snap_name, nframes, fstart, fh);
+				snap_hash = fh;
 				snap_pending = 1'b0;
 				snap_done = 1'b1;
 			end
 			$fwrite(ffr, "\n");
+			last_hash = fh;
 			nframes = nframes + 1;
 		end
 		seen_vs = 1'b1;
@@ -128,14 +133,18 @@ always @(negedge refclk) begin
 end
 
 task snap(input [8*32-1:0] name);
+	snap_d(name, SNAP_DELAY);
+endtask
+
+task snap_d(input [8*32-1:0] name, input [63:0] delay);
 	begin
 		snap_name = name;
-		snap_after = cyc + SNAP_DELAY;
+		snap_after = cyc + delay;
 		snap_done = 1'b0;
 		snap_pending = 1'b1;
 		snap_limit = snap_after + 4 * H_TOTAL * V_TOTAL;    // the frame must end within 4 VGA frames
 		wait (snap_done || cyc >= snap_limit);
-		if (!snap_done) tb_sys.fatal("frame_capture: snap without a complete frame within 24 ms + 4 VGA frames");
+		if (!snap_done) tb_sys.fatal("frame_capture: snap without a complete frame within the delay + 4 VGA frames");
 	end
 endtask
 

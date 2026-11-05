@@ -1,0 +1,9 @@
+# X-check map of PR09 (branch video, cb1c70b): gen_sim --xcheck-map, row id of xcheck_regs.tsv -> candidate
+# modules. The registers moved from rk_video into rk86_video (instance native of rk_video); see
+# pr09-video.power_up_map.tsv.
+id	modules
+state@rk_video	rk_video,rk86_video
+h_cnt@rk_video	rk_video,rk86_video
+v_cnt@rk_video	rk_video,rk86_video
+d_cnt@rk_video	rk_video,rk86_video
+data@rk_video	rk_video,rk86_video

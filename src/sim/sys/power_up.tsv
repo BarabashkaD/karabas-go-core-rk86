@@ -10,7 +10,9 @@
 # Start set (Step 2): the quick init of the spike (plan F17) with the values of the hardware. Added by
 # the X-check iterations (Step 3; X on the observed pins, in the SRAM writes or the screen memory):
 # Task 3 smoke: loader file_load, CPU H and L; Task 4 basic chain: CRT buf0 and buf1 (VGA X from
-# 18.9 ms), CPU B (PUSH B at 56 ms). Reviewed (Step 4): every register row equals the extraction of
+# 18.9 ms), CPU B (PUSH B at 56 ms); Task 5: the registers and FSMs of the file loader (loader.v resets
+# them only on fileloader_reset, so a file-load chain must not start from X). Reviewed (Step 4, script
+# tools/power_up_review.py): every register row equals the extraction of
 # go, mini and minig (power_up_bits of build/sim/sys/extract/regs_<board>.tsv); buf0 / buf1 are LUT RAM
 # with INIT 0 in all 24 cells on the three boards.
 signal	modules	value	source	fsm
@@ -72,6 +74,18 @@ L	k580wm80a	8'h00	FDE x8 \machine/CPU/L_7..L_0, INIT 0 (default), pr07-baseline/
 opa	k580ww55	8'hFF	FDPE x8, INIT 1 (default), pr07-baseline/go
 opc	k580ww55	8'hFF	FDPE x4 (bits 7:4 not in the netlist, set to 1 as the reset value), INIT 1 (default), pr07-baseline/go
 file_load	loader	1'b0	FD \loader/file_load, INIT 0 (default), pr07-baseline/go (radio86rk_synth.v 33259); the loader reset (cpurst | joy_rst) never pulses at power-up
+adr	loader	21'd0	FDRE x21, INIT 0 (default), pr07-baseline/go; set only after CMD_IOCTL_SLOT (fileloader_reset): X until a file load without it
+count	loader	16'd0	FDRE x16, INIT 0 (default), pr07-baseline/go; set only after fileloader_reset
+data	loader	8'd0	FDRE x8, INIT 0 (default), pr07-baseline/go; set only after fileloader_reset
+ena_wr	loader	1'b0	FDR, INIT 0 (default), pr07-baseline/go; set only after fileloader_reset
+endf	loader	16'd0	FDE x16, INIT 0 (default), pr07-baseline/go; header bytes of the file
+fmem_data	loader	8'd0	LD x8, INIT 0 (default), pr07-baseline/go; latched on fileloader_wr
+fstate	loader	3'd0	loader/FSM_1 user, state FFs FDR INIT 0 (default) -> state 000, pr07-baseline/go (.syr 1741-1752); set only after fileloader_reset	loader/FSM_1 user: 000=000 011=011 001=001 010=010 100=100 101=101 110=110
+hstate	loader	3'd0	loader/FSM_0 user, state FFs FDR INIT 0 (default) -> state 000, pr07-baseline/go (.syr 1730-1739); set only after fileloader_reset	loader/FSM_0 user: 000=000 001=001 010=010 011=011 100=100
+len	loader	16'd0	FDE x16, INIT 0 (default), pr07-baseline/go
+mem_adr	loader	21'd0	FDRE x21, INIT 0 (default), pr07-baseline/go; set only after fileloader_reset
+startf	loader	16'd0	FDE x16, INIT 0 (default), pr07-baseline/go; header bytes of the file
+pulse_counter	loader	16'd0	async load triples FDC / FDP / LDC (LDC ? P : C), INIT 0 (default), pr07-baseline/go; counts fileloader_wr pulses
 VMODE	soft_switches	1'b0	FD, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
 SOUND	soft_switches	1'b0	FD, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)
 ROM_SEL	soft_switches	2'b00	FDE x2, INIT 0 (default), pr07-baseline/go (output without RTL initial value, F16)

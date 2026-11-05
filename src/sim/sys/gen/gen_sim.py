@@ -4,6 +4,7 @@ Usage:
   python -B gen_sim.py <rev_dir> <tb_dir> <board> <out_dir> --ipcore-dir <dir> --ipcore-ref <dir>
          [--ipcore-sha <sha>] [--rev-sha <sha>] [--tb-sha <sha>] [--tb <file> ...] [--tb-top tb_sys]
          [--power-up <tsv>] [--power-up-map <tsv>] [--xcheck-regs <tsv>] [--xcheck-map <tsv>]
+         [--syr <.syr>] [--compare] [--peer-rev <dir> [--self-compare]] [--seed <name> ...]
 
   <rev_dir>     export of the compared revision (src/, modules/)
   <tb_dir>      export of the TB revision (src/sim/, pk/): TB, models, tables
@@ -20,6 +21,15 @@ Usage:
                 (signal@first-candidate, or the bare signal for power-up rows) <TAB> modules; for an X-check
                 row the modules '-' drop it for this comparison (listed in summary.txt). An X-check row whose
                 netlist boards include the board must hit exactly once; the RTL hierarchy only adds rows.
+  --syr         the .syr of the compared revision: every power-up row is matched with its FSMs by instance
+                prefix + signal (the instance paths of the module of the row under the top): a row with an fsm
+                field must equal its FSM, a row on an FSM register without an fsm field is POWER-UP DIFFERS.
+  --compare     a comparison run (tools/compare_runs.py): --syr is mandatory, POWER-UP DIFFERS / UNCOMPARED
+                stop the generator (exit 2) after summary.txt is written.
+  --peer-rev    the export of the other revision: its RTL hashes go into summary.txt; byte-identical RTL stops
+                the generator unless --self-compare (A2).
+  --seed        a seeded change of the calibration on this side only (A2): opos_restart (k580wg75.v, timing),
+                rom_banner (roms/BIOSSD.hex FF5B, data). Listed under SEEDED CHANGES in summary.txt.
   The out_dir is cleaned (everything except <rev_dir>) before it is written.
 
 Every change of an RTL file is a declared substitution with an exact count check (subst.py);
@@ -339,9 +349,38 @@ def read_syr_fsms(path):
     return res
 
 
-def fsm_compare(sig, module, field, fsms, syr):
+def fsm_prefix(name):
+    """Instance prefix of an XST FSM name: 'machine/CPU/FSM_9' -> 'machine/CPU', 'FSM_0' -> ''."""
+    return name.rsplit('/', 1)[0] if '/' in name else ''
+
+
+def inst_paths(units, top):
+    """{unit name (lower case): [instance path from the top, '/'-joined]} over the Verilog
+    instances (the XST FSM names carry these paths); the top has the path ''."""
+    paths = {}
+
+    def walk(u, path, depth):
+        if depth > 50:
+            die('instance hierarchy too deep at %s' % u.name)
+        paths.setdefault(u.name.lower(), []).append(path)
+        for inst, mod in getattr(u, 'insts', []):
+            v = units.get(mod.lower())
+            if v is not None:
+                walk(v, (path + '/' if path else '') + inst, depth + 1)
+    walk(units[top.lower()], '', 0)
+    return paths
+
+
+def syr_fsms_of(fsms, sig, prefixes):
+    """FSMs of the .syr on the signal sig whose instance prefix is one of prefixes (instance prefix +
+    signal, never the bare signal name: a register 'state' of another instance is another FSM)."""
+    return [f for f in fsms if f[1] == sig and fsm_prefix(f[0]) in prefixes]
+
+
+def fsm_compare(sig, module, field, fsms, syr, prefixes):
     """Compare the fsm field of a power-up row ('<fsm> <kind>: <state>=<code> ...') with the FSM
-    of the same signal in the .syr of the compared revision (Task 2 Step 4)."""
+    of the same instance and signal in the .syr of the compared revision (Task 2 Step 4). The FSM
+    name of the field is documentation: XST numbers the FSMs anew in every build."""
     m = re.match(r'^\s*(\S+)\s+([\w-]+)\s*:\s*(.*)$', field)
     if not m:
         die('power-up row %s: fsm field %r is not "<fsm> <kind>: <state>=<code> ..."' % (sig, field))
@@ -350,10 +389,10 @@ def fsm_compare(sig, module, field, fsms, syr):
     if fsms is None:
         return 'POWER-UP UNCOMPARED (%s.%s FSM encoding: no --syr of the compared revision; table %s %s)' % (
             module, sig, kind, m.group(3))
-    hits = [f for f in fsms if f[1] == sig]
+    hits = syr_fsms_of(fsms, sig, prefixes)
     if len(hits) != 1:
-        return 'POWER-UP DIFFERS (%s FSM encoding: %d FSMs on signal %s in %s, table %s %s)' % (
-            module, len(hits), sig, os.path.basename(syr), kind, m.group(3))
+        return 'POWER-UP DIFFERS (%s FSM encoding: %d FSMs on signal %s of the instances %s in %s, table %s %s)' % (
+            module, len(hits), sig, ', '.join(prefixes) or '(none)', os.path.basename(syr), kind, m.group(3))
     name, _, skind, stable = hits[0]
     if skind != kind or stable != table:
         return 'POWER-UP DIFFERS (%s FSM encoding: %s %s %s in %s, table %s %s)' % (
@@ -362,6 +401,67 @@ def fsm_compare(sig, module, field, fsms, syr):
     return 'FSM %s.%s: %s %s %s equals the table (%s)' % (module, sig, name, skind,
                                                         ' '.join('%s=%s' % x for x in stable.items()),
                                                         os.path.basename(syr))
+
+
+def mem_bounds(u, d, what):
+    """(lo, hi) of the one unpacked dimension of a Verilog memory; parametric bounds are resolved from
+    the parameters / localparams of the module (integer expressions), anything else stops."""
+    raw = getattr(d, 'dims_raw', None) or []
+    if len(raw) != 1:
+        die('%s: memory %s.%s has %d unpacked dimensions, only 1 is supported' % (what, u.name, d.name, len(raw)))
+    m = re.match(r'^\s*(.+?)\s*:\s*(.+?)\s*$', raw[0])
+    if not m:
+        die('%s: memory %s.%s: dimension [%s] is not [a:b]' % (what, u.name, d.name, raw[0]))
+    body = hdl.blank_comments_v(u.src.text)[u.start:u.end]
+    params = {}
+    for pm in re.finditer(r'\b(?:parameter|localparam)\b\s*(?:integer\s*)?(?:\[[^\]]*\]\s*)?(\w+)\s*=\s*([^,;)]+)',
+                          body):
+        params[pm.group(1)] = pm.group(2).strip()
+
+    def ev(expr, depth=0):
+        if depth > 10:
+            raise ValueError('parameter chain too deep')
+        e = expr.strip()
+        e = re.sub(r"\d*'[dD](\d+)", r'\1', e)
+        for name in sorted(set(re.findall(r'[A-Za-z_]\w*', e)), key=len, reverse=True):
+            if name not in params:
+                raise ValueError('%s is not a parameter of the module' % name)
+            e = re.sub(r'\b%s\b' % name, '(%d)' % ev(params[name], depth + 1), e)
+        if not re.match(r'^[\d\s+\-*/()]+$', e):
+            raise ValueError('%r is not an integer expression' % expr)
+        # safe: e holds only digits, blanks, + - * / and parentheses (checked above), no names
+        return int(eval(e.replace('/', '//'), {'__builtins__': {}}, {}))
+    try:
+        lo, hi = sorted((ev(m.group(1)), ev(m.group(2))))
+    except (ValueError, SyntaxError, ZeroDivisionError) as e:
+        die('%s: memory %s.%s: cannot resolve the dimension [%s]: %s' % (what, u.name, d.name, raw[0], e))
+    return lo, hi
+
+
+# seeded changes on one side of a calibration (amendment A2): name -> description
+SEEDS = {
+    'opos_restart': "k580wg75.v: the opos restart at the hrtc fall maxx[6:1] + D0h -> + D1h (one line, timing: "
+                    "every character column one cce earlier)",
+    'rom_banner': "roms/BIOSSD.hex: the byte at FF5B of the loaded ROM (BIOSSD.BIN offset F5Bh, the first "
+                  "letter of the banner, 72h 'r') -> 52h 'R' (one byte of data)",
+}
+
+
+def prj_rtl_hashes(rev, top):
+    """[(key, sha256)] of the RTL files of <rev>/src/<top>.prj (Coregen wrappers excluded)."""
+    prj = os.path.join(rev, 'src', top + '.prj')
+    if not os.path.isfile(prj):
+        die('peer revision: %s missing' % prj)
+    res = []
+    for line in open(prj, newline=''):
+        m = re.match(r'^\s*(verilog|vhdl)\s+(\w+)\s+"([^"]+)"', line)
+        if not m or m.group(3).startswith('ipcore_dir/'):
+            continue
+        path = os.path.normpath(os.path.join(rev, 'src', m.group(3)))
+        if not os.path.isfile(path):
+            die('peer revision: %s missing' % path)
+        res.append((rel(path, rev), sha256(path)))
+    return res
 
 
 def main():
@@ -383,11 +483,27 @@ def main():
     ap.add_argument('--xcheck-regs', help='default <tb_dir>/src/sim/sys/xcheck_regs.tsv')
     ap.add_argument('--xcheck-map', help='per-comparison override: id <TAB> candidate modules')
     ap.add_argument('--syr', help='XST report (.syr) of the compared revision (its S0 build): the FSM encodings '
-                    'of the power-up rows with an fsm field are compared with it (Task 2 Step 4)')
+                    'of the power-up rows with an fsm field are compared with it (Task 2 Step 4); every row on an '
+                    'FSM register of the .syr (instance prefix + signal) must carry an fsm field')
+    ap.add_argument('--compare', action='store_true',
+                    help='compare mode (a run for compare_runs.py): --syr is mandatory, and any POWER-UP DIFFERS or '
+                    'POWER-UP UNCOMPARED verdict stops the generator after summary.txt is written')
+    ap.add_argument('--peer-rev', help='export of the other revision of the comparison: the sha256 of its RTL files '
+                    'go into summary.txt; byte-identical RTL of both revisions stops the generator unless '
+                    '--self-compare')
+    ap.add_argument('--self-compare', action='store_true',
+                    help='explicit self-compare (A2): the peer revision may export byte-identical RTL')
+    ap.add_argument('--seed', choices=sorted(SEEDS), action='append',
+                    help='seeded change of the calibration, applied to this side only (A2): %s'
+                    % '; '.join('%s = %s' % kv for kv in sorted(SEEDS.items())))
     a = ap.parse_args()
 
     rev, tbd, out = [os.path.abspath(x) for x in (a.rev_dir, a.tb_dir, a.out_dir)]
     check_out_dir(out, rev, tbd, os.path.abspath(a.ipcore_dir), os.path.abspath(a.ipcore_ref))
+    if a.compare and not a.syr:
+        die('--compare needs --syr: the FSM encodings of the power-up table must be compared in a comparison run')
+    if a.self_compare and not a.peer_rev:
+        die('--self-compare needs --peer-rev')
     sysdir = os.path.join(tbd, 'src', 'sim', 'sys')
     board = BOARDS[a.board]
     top = board['top']
@@ -525,6 +641,14 @@ def main():
     else:
         j.note(14, '-', 'PCM5102 not in the design', found=0, expected=0)
 
+    # ---- seeded changes (A2), this side only
+    seeds = sorted(set(a.seed or []))
+    if 'opos_restart' in seeds:
+        s = need('k580wg75')
+        s.text = j.sub('S1', s.key, s.text, r"\bopos <= \{2'b0,maxx\[6:1\]\}\+8'hD0;",
+                       "opos <= {2'b0,maxx[6:1]}+8'hD1; // SEEDED CHANGE opos_restart (A2)", 1,
+                       'SEEDED CHANGE opos_restart: ' + SEEDS['opos_restart'], kind='seed')
+
     # ---- #7 HDMI I_FREQ literal width
     s = need(top)
     s.text = j.sub(7, s.key, s.text, r'\.I_FREQ\s*\(\s*40\s*\)', ".I_FREQ(8'd40)", board['i_freq'],
@@ -642,6 +766,8 @@ def main():
             override[r['signal']] = r['modules']
     placed, verdicts, fsm_checks = [], [], []
     syr_fsms = read_syr_fsms(a.syr) if a.syr else None
+    ipaths = inst_paths(units, top)
+    fsm_rows = set()   # (instance prefix, signal) of the power-up rows that landed on a register
     vhdl_init = {}     # unit -> [(decl, value)]
     v_init = {}        # unit -> [(sig, value)]
     for r in pu_rows:
@@ -661,15 +787,28 @@ def main():
             die('power-up row %s (%s): %d matches in %s, expected exactly 1'
                 % (sig, ','.join(cands), len(hits), [h[0] for h in hits]))
         c, u, d = hits[0]
+        prefixes = ipaths.get(u.name.lower(), [])
+        for p in prefixes:
+            fsm_rows.add((p, d.name))
         if r.get('fsm'):
-            fsm_checks.append(fsm_compare(sig, c, r['fsm'], syr_fsms, a.syr))
-            if fsm_checks[-1].startswith('POWER-UP DIFFERS'):
+            if not prefixes:
+                die('power-up row %s has an fsm field, but module %s has no instance path under %s (the FSM '
+                    'is matched by instance prefix + signal)' % (sig, c, top))
+            fsm_checks.append(fsm_compare(d.name, c, r['fsm'], syr_fsms, a.syr, prefixes))
+            if fsm_checks[-1].startswith(('POWER-UP DIFFERS', 'POWER-UP UNCOMPARED')):
+                verdicts.append(fsm_checks[-1])
+        elif syr_fsms is not None:
+            # a row on an FSM register of the .syr must carry the fsm field (its power-up state is an encoding)
+            on_fsm = syr_fsms_of(syr_fsms, d.name, prefixes)
+            if on_fsm:
+                fsm_checks.append('POWER-UP DIFFERS (%s.%s is the FSM %s (%s encoding) in %s, but the row has no fsm '
+                                  'field)' % (c, d.name, ', '.join(f[0] for f in on_fsm),
+                                              ', '.join(f[2] for f in on_fsm), os.path.basename(a.syr)))
                 verdicts.append(fsm_checks[-1])
         rtl, partial = None, False
-        mem =u.lang == 'verilog' and d.kind == 'mem'
-        if mem and len(d.dims) != 1:
-            die('power-up row %s: memory %s.%s has %d unpacked dimensions, only 1 is supported'
-                % (sig, c, d.name, len(d.dims)))
+        mem = u.lang == 'verilog' and d.kind == 'mem'
+        if mem:
+            mlo, mhi = mem_bounds(u, d, 'power-up row %s' % sig)
         if u.lang == 'verilog':
             rm = re.search(r'\$readmem[hb]\s*\([^;]*?,\s*%s\b' % re.escape(d.name),
                            hdl.blank_comments_v(u.src.text)[u.start:u.end])
@@ -698,7 +837,7 @@ def main():
             placed.append('%s -> %s: kept %s' % (sig, where, status))
             continue
         if mem:
-            lo, hi = sorted(int(x) for x in d.dims[0])
+            lo, hi = mlo, mhi
             stmt = ('\tbegin : sim_pu_%s integer i; for (i = %d; i <= %d; i = i + 1) %s[i] = %s; end'
                     % (d.name, lo, hi, d.name, value))
             v_init.setdefault(u.name.lower(), (u, []))[1].append(('%s[%d:%d]' % (d.name, lo, hi), stmt))
@@ -708,6 +847,12 @@ def main():
         else:
             vhdl_init.setdefault(u.name.lower(), (u, []))[1].append((d, value))
         placed.append('%s -> %s = %s (%s)' % (sig, where, value, r.get('source', '')))
+    fsm_free = []
+    if syr_fsms is not None:
+        for f in syr_fsms:
+            if (fsm_prefix(f[0]), f[1]) not in fsm_rows:
+                fsm_free.append('%s on %s (%s encoding): no power-up row (informative: a register with a reset, or '
+                                'outside the table)' % (f[0], f[1], f[2]))
     for k, (u, lst) in v_init.items():
         add_block(u, 'initial begin // sim copy: power-up values of the hardware (src/sim/sys/power_up.tsv)\n%s\nend'
                   % '\n'.join(x[1] for x in lst))
@@ -786,9 +931,7 @@ def main():
         where = '%s.%s (%s)' % (c, d.name, u.src.key)
         if u.lang == 'verilog':
             if d.kind == 'mem':
-                if not d.dims:
-                    die('X-check %s: memory without numeric bounds' % where)
-                lo, hi = sorted(int(x) for x in d.dims[0])
+                lo, hi = mem_bounds(u, d, 'X-check row %s' % r['id'])
                 vlines.setdefault(u.name.lower(), (u, []))[1].append(
                     '\tfor (sim_xc_i = %d; sim_xc_i <= %d; sim_xc_i = sim_xc_i + 1) if (^%s[sim_xc_i] === 1\'bx) '
                     'begin $display("XCHECK %%m.%s[%%0d] = %%b", sim_xc_i, %s[sim_xc_i]); '
@@ -953,6 +1096,31 @@ def main():
         if f.upper().endswith('.BIN'):
             n = mkhex.bin2hex(os.path.join(romdir, f), os.path.join(out, 'roms', os.path.splitext(f)[0] + '.hex'))
             roms.append('roms/%s.hex: %s, %d bytes' % (os.path.splitext(f)[0], f, n))
+    if 'rom_banner' in seeds:
+        hx = os.path.join(out, 'roms', 'BIOSSD.hex')
+        hl = read(hx).split('\n')
+        data = [i for i, x in enumerate(hl) if x.strip() and not x.startswith('//')]
+        if len(data) != 4096 or hl[data[0xF5B]].strip().lower() != '72':
+            die('seed rom_banner: roms/BIOSSD.hex has %d bytes and %r at F5Bh, expected 4096 and 72' %
+                (len(data), hl[data[0xF5B]] if len(data) > 0xF5B else None))
+        hl[data[0xF5B]] = '52'
+        write(hx, '\n'.join(hl))
+        j.note('S2', 'roms/BIOSSD.hex', 'SEEDED CHANGE rom_banner: ' + SEEDS['rom_banner'], found=1, expected=1,
+               kind='seed')
+    peer_lines, rtl_cmp = [], None
+    if a.peer_rev:
+        peer = prj_rtl_hashes(os.path.abspath(a.peer_rev), top)
+        own = [tuple(x.split('  ')[::-1]) for x in rtl_hashes]          # (key, sha)
+        peer_lines = ['%s  %s' % (h, k) for k, h in peer]
+        ndiff = len(set(own) ^ set(peer))
+        if ndiff == 0:
+            if not a.self_compare:
+                die('the peer revision %s exports byte-identical RTL (%d files): a comparison of identical RTL is '
+                    'refused; use --self-compare for an explicit self-compare' % (a.peer_rev, len(own)))
+            rtl_cmp = 'byte-identical RTL (%d files): explicit self-compare (--self-compare)' % len(own)
+        else:
+            only = sorted(set(k for k, _ in set(own) ^ set(peer)))
+            rtl_cmp = '%d files differ or exist on one side only: %s' % (len(only), ', '.join(only))
     write(os.path.join(out, 'run_sys_sim.sh'), read(os.path.join(sysdir, 'run_sys_sim.sh')))
     write(os.path.join(out, 'sim.prj'), '\n'.join(prj_lines) + '\n')
     # TB_RESULT=required: the system TB prints a RESULT line, a run without one fails (run_sys_sim.sh);
@@ -986,8 +1154,18 @@ def main():
     sm.append('POWER-UP (A3: where each row of %s landed)' % rel(pu_path, tbd).replace('\\', '/'))
     sm += ['  ' + x for x in placed]
     sm.append('')
-    sm.append('FSM ENCODINGS (power-up rows with an fsm field against --syr of the compared revision)')
+    sm.append('FSM ENCODINGS (power-up rows against the FSMs of --syr of the compared revision, matched by instance '
+              'prefix + signal: a row with an fsm field must equal its FSM, a row on an FSM register needs an fsm '
+              'field)')
+    sm.append('  --syr: %s' % (os.path.basename(a.syr) if a.syr else 'none (the fsm rows are UNCOMPARED)'))
     sm += ['  ' + x for x in fsm_checks] or ['  (no fsm rows)']
+    sm += ['  ' + x for x in fsm_free]
+    sm.append('')
+    sm.append('COMPARE MODE: %s' % ('yes (--syr mandatory; POWER-UP DIFFERS / UNCOMPARED stop the generator)'
+                                    if a.compare else 'no'))
+    sm.append('')
+    sm.append('SEEDED CHANGES (A2, this side only): %d' % len(seeds))
+    sm += ['  #%s %s: %s' % (e['num'], e['file'], e['desc']) for e in j.entries if e['kind'] == 'seed']
     sm.append('')
     sm.append('VERDICTS')
     sm += ['  ' + x for x in verdicts] or ['  (none)']
@@ -1007,9 +1185,29 @@ def main():
     sm.append('')
     sm.append('RTL FILES OF THE REVISION (sha256)')
     sm += ['  ' + x for x in rtl_hashes]
+    if a.peer_rev:
+        sm.append('')
+        sm.append('RTL FILES OF THE PEER REVISION (sha256; --peer-rev %s)' % os.path.basename(os.path.abspath(a.peer_rev)))
+        sm += ['  ' + x for x in peer_lines]
+        sm.append('RTL COMPARISON: %s' % rtl_cmp)
+    sim_hashes = []
+    for d0, _, fs in os.walk(out):
+        for f in fs:
+            p = os.path.join(d0, f)
+            k = rel(p, out)
+            if k.startswith(('sim/', 'roms/')):
+                sim_hashes.append('%s  %s' % (sha256(p), k))
+    sm.append('')
+    sm.append('SIM COPIES AND ROM IMAGES OF THE WORK TREE (sha256)')
+    sm += ['  ' + x for x in sorted(sim_hashes, key=lambda x: x.split('  ')[1])]
     write(os.path.join(out, 'summary.txt'), '\n'.join(sm) + '\n')
-    print('gen_sim: %s -> %s: %d sources, %d substitution kinds, %d power-up rows, %d X-checked registers'
-          % (a.board, out, len(prj_lines), nsub, len(pu_rows), xc_total))
+    print('gen_sim: %s -> %s: %d sources, %d substitution kinds, %d power-up rows, %d X-checked registers%s'
+          % (a.board, out, len(prj_lines), nsub, len(pu_rows), xc_total,
+             (', seeded: ' + ', '.join(seeds)) if seeds else ''))
+    if a.compare:
+        bad = [v for v in verdicts if v.startswith(('POWER-UP DIFFERS', 'POWER-UP UNCOMPARED'))]
+        if bad:
+            die('compare mode: %d power-up verdicts (summary.txt VERDICTS): %s' % (len(bad), '; '.join(bad)))
 
 
 if __name__ == '__main__':

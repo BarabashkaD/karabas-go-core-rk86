@@ -35,12 +35,19 @@ the doubling and the overlay):
   pixel_cnt, line_cnt, address_out); pixel = data_out & (CounterX < 800 & CounterY < 600); colour 80h on
   R, G, B (Text color 0) or 20h/80h/20h (1); the overlay passes RGB through while the OSD is closed.
 - Pin coordinates: frames.py.
+- The VGA side replays rk_video.v (the native side above does not use it); its artefacts are RTL facts
+  with counted expectations in render.txt (READ PATH lines, FAIL on another count): x 0..1 of a line show
+  fb column 407 of the row before (x 0..1 of line 0: fb address 0), line 599 shows fb address 0 from x 3
+  (the second copy of fb row 299 is lost), every other dot fb[y // 2][(x - 2) // 2].
 Alignment: the bounding boxes of the lit dots of the capture and of the rendering must coincide (else
 "render offset", FAIL); then every visible dot is compared. The cursor cell (column [7602h], row [7603h],
 the monitor's cursor variables, written to the CRT with command 80h, BIOS FD85-FD96) and the blinking
 fields depend on the frame counter of the CRT: each of their lines must equal the rendering with the
-phase on or off (recorded). Field checks (CP3): reverse video fields have more than half of the dots of
-their glyph rows (scan rows 1..8) lit; underlined fields have all 6 dots of every cell lit on scan row 9.
+phase on or off (recorded); from top to bottom the phases may change at most once in a frame (the frame
+shows the end of one CRT frame and the start of the next), else FAIL. A snap with the cursor off is noted;
+--cursor-on <prefix>: at least one snap of that name prefix must show the cursor on (its position checked).
+Field checks (CP3): reverse video fields have more than half of the dots of their glyph rows (scan rows
+1..8) lit; underlined fields have all 6 dots of every cell lit on scan row 9.
 """
 import argparse
 import os
@@ -207,6 +214,59 @@ def read_path():
     return src
 
 
+def read_path_facts(src, log):
+    """The read-path artefacts of rk_video.v as RTL facts with counted expectations (the VGA side replays
+    rk_video.v clock by clock; the native side above is independent of it). Returns True if the replay
+    gives exactly the known artefacts and every other dot shows fb[y // 2][(x - 2) // 2]."""
+    n_ideal = n_lead = n_lead0 = n_l599 = n_other = 0
+    for cy in range(frames.VIS_H):
+        for cx in range(frames.VIS_W):
+            a = src[cy][cx]
+            if cx >= 2 and a == (cy // 2) * FB_W + (cx - 2) // 2:
+                n_ideal += 1
+            elif cx < 2 and cy == 0 and a == 0:
+                n_lead0 += 1
+            elif cx < 2 and cy > 0 and a == ((cy - 1) // 2) * FB_W + FB_W - 1:
+                n_lead += 1
+            elif cy == frames.VIS_H - 1 and cx >= 3 and a == 0:
+                n_l599 += 1
+            else:
+                n_other += 1
+    facts = [
+        ('x 0..1 of the lines 1..599 show fb column 407 of the fb row of the line before (the rambuffer read '
+         'latency of 1 clock after address_out)', n_lead, 2 * (frames.VIS_H - 1)),
+        ('x 0..1 of line 0 show fb address 0', n_lead0, 2),
+        ('line 599 x 3..799 shows fb address 0 (pixel_cnt / line_cnt reset on every clock of CounterY 599): the '
+         'second copy of fb row 299 is lost, only line 598 shows it', n_l599, frames.VIS_W - 3),
+        ('all other dots show fb[y // 2][(x - 2) // 2]', n_ideal, frames.VIS_W * frames.VIS_H - 2 * frames.VIS_H -
+         (frames.VIS_W - 3)),
+        ('dots outside these rules', n_other, 0),
+    ]
+    ok = True
+    for text, got, want in facts:
+        good = got == want
+        ok = ok and good
+        log('READ PATH: %s: %d dots (expected %d) %s' % (text, got, want, 'ok' if good else 'FAIL'))
+    return ok
+
+
+def phase_segments(lines):
+    """lines: [(y, set of (frame3, frame4) phases the line matches)] top to bottom. Greedy split into runs
+    with a common phase (the fewest runs); returns [(first y, last y, common phases)]."""
+    segs = []
+    cur, y0, y1 = None, None, None
+    for y, m in lines:
+        if cur is not None and cur & m:
+            cur, y1 = cur & m, y
+        else:
+            if cur is not None:
+                segs.append((y0, y1, cur))
+            cur, y0, y1 = set(m), y, y
+    if cur is not None:
+        segs.append((y0, y1, cur))
+    return segs
+
+
 def vga_from_fb(fb, src):
     flat = bytearray()
     for row in fb:
@@ -227,7 +287,7 @@ def bbox(img):
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def render_snap(name, snap, ram, font, vg, sb, dma_count, colour, ppm_dir, src, log):
+def render_snap(name, snap, ram, font, vg, sb, dma_count, colour, ppm_dir, src, log, info):
     ok = True
     rows = parse_rows(ram, sb, vg)
     total = sum(r[1] for r in rows)
@@ -272,10 +332,14 @@ def render_snap(name, snap, ram, font, vg, sb, dma_count, colour, ppm_dir, src, 
             log('RENDER %s: FAIL render offset: capture bbox %s, render bbox %s (dx %d, dy %d; H0 %d, V0 %d analytic)'
                 % (name, bc, br, dx, dy, vg.h0, vg.v0))
             return False
-    # per line: the dots that depend on the phases must equal one variant; all others equal
+    # per line: the dots that depend on the phases (frame[3] cursor, frame[4] blink) must equal one variant;
+    # all others equal. The framebuffer is written by the CRT frame (24 ms) and read by the VGA frame
+    # (16.6 ms): one VGA frame can show the end of one CRT frame and the start of the next, i.e. at most one
+    # phase transition from top to bottom
     ndiff = 0
     phases = {'cursor': set(), 'blink': set()}
     first = []
+    plines, cur_lines = [], []
     for y in range(frames.VIS_H):
         c = capb[y]
         dep = [x for x in range(frames.VIS_W) if len(set(var[k][y][x] for k in var)) > 1]
@@ -292,18 +356,41 @@ def render_snap(name, snap, ram, font, vg, sb, dma_count, colour, ppm_dir, src, 
                 if len(first) < 10:
                     first.append(('line', y, 'no phase matches', len(dep)))
             else:
+                plines.append((y, set(match)))
+                if any(var[(0, f4)][y][x] != var[(1, f4)][y][x] for x in dep for f4 in (0, 1)):
+                    cur_lines.append(set(match))
                 f3s = set(k[0] for k in match)
                 f4s = set(k[1] for k in match)
                 if len(f3s) == 1:
                     phases['cursor'].add(f3s.pop())
                 if len(f4s) == 1:
                     phases['blink'].add(f4s.pop())
+    segs = phase_segments(plines)
+    if not cur_lines:
+        cursor_state = 'n/a'
+    elif all(all(k[0] == 1 for k in m) for m in cur_lines):
+        cursor_state = 'on'
+    elif all(all(k[0] == 0 for k in m) for m in cur_lines):
+        cursor_state = 'off'
+    else:
+        cursor_state = 'undetermined'
+    info['cursor'] = cursor_state
     lit_c = sum(sum(r) for r in capb)
     lit_r = sum(sum(r) for r in base)
     log('RENDER %s: frame %d (start cycle %d): %d dots differ; lit dots capture %d, render %d (phases 0); bbox %s; '
         'H0 %d V0 %d; cursor column %d row %d, phase frame[3] %s; blink phase frame[4] %s'
         % (name, snap.frame, snap.start, ndiff, lit_c, lit_r, bc, vg.h0, vg.v0, cx, cy,
            sorted(phases['cursor']) or 'n/a', sorted(phases['blink']) or 'n/a'))
+    log('  phases top to bottom: %s; %d transition(s) %s' % (
+        '; '.join('lines %d-%d (frame[3], frame[4]) in %s' % (s[0], s[1], sorted(s[2])) for s in segs) or 'none',
+        max(0, len(segs) - 1), 'ok' if len(segs) <= 2 else 'FAIL (more than one transition in a frame)'))
+    if len(segs) > 2:
+        ok = False
+    if cursor_state == 'off':
+        log('  NOTE %s: the cursor (column %d row %d) was off in this snap: its position is not checked here'
+            % (name, cx, cy))
+    else:
+        log('  cursor (column %d row %d): %s' % (cx, cy, cursor_state))
     for f in first:
         log('  first differences: %s' % (f,))
     if ndiff:
@@ -361,6 +448,9 @@ def main():
     ap.add_argument('--dma-count', type=int, default=2340, help='DMA bytes per frame (BIOS FAF3-FAF5: 4923h)')
     ap.add_argument('--color', type=int, default=0, choices=(0, 1), help='OSD Text color')
     ap.add_argument('--snap', action='append', help='snap names (default: all in snaps.txt)')
+    ap.add_argument('--cursor-on', action='append', default=[], metavar='PREFIX',
+                    help='at least one snap whose name starts with PREFIX must show the cursor on (its position '
+                    'is then checked), else FAIL (the basic chain: keys)')
     ap.add_argument('--ppm', action='store_true')
     a = ap.parse_args()
     lines = []
@@ -380,6 +470,9 @@ def main():
     if not names:
         log('RENDER: no snaps in %s' % os.path.join(a.simout, 'snaps.txt'))
     src = read_path() if names else None
+    if src is not None and not read_path_facts(src, log):
+        ok = False
+    infos = {}
     for n in names:
         if n not in snaps:
             log('RENDER %s: FAIL no such snap' % n)
@@ -392,10 +485,21 @@ def main():
             continue
         try:
             ram = read_ram(os.path.join(a.simout, 'ram_%s.hex' % n))
-            ok = render_snap(n, s, ram, font, vg, int(a.sb, 16), a.dma_count, a.color,
-                             a.simout if a.ppm else None, src, log) and ok
+            infos[n] = {}
+            good = render_snap(n, s, ram, font, vg, int(a.sb, 16), a.dma_count, a.color,
+                               a.simout if a.ppm else None, src, log, infos[n])
+            if not good:
+                log('RENDER %s: FAIL' % n)
+            ok = good and ok
         except (Unsupported, ValueError, IOError) as e:
             log('RENDER %s: FAIL %s' % (n, e))
+            ok = False
+    for p in a.cursor_on:
+        group = [n for n in names if n.startswith(p)]
+        on = [n for n in group if infos.get(n, {}).get('cursor') == 'on']
+        log('RENDER cursor shown in the snaps %s*: %s %s' % (p, ', '.join(on) or 'none of %s' % (group or 'no snap'),
+                                                               'ok' if on else 'FAIL (its position is not checked)'))
+        if not on:
             ok = False
     log('RENDER %s' % ('PASS' if ok else 'FAIL'))
     with open(os.path.join(a.simout, 'render.txt'), 'w') as f:

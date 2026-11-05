@@ -8,12 +8,16 @@
 //           CP1 prompt  the monitor writes "-->" one row below its banner "radio-86rk" (event prompt;
 //                       timeout 400 ms after init_done, then simout/ram_timeout.hex and FAIL)
 //           CP2         snap("prompt"): simout/snaps.txt (the frame) and simout/ram_prompt.hex (RAM 0..7FFF)
-//           CP3         field attributes poked into the screen rows 27-29 (no bus cycle), snap("attr"),
+//           CP3         field attributes poked into the screen rows 28-29 (no bus cycle), snap("attr"),
 //                       simout/ram_attr.hex
 //           CP4         keys: D (HID 07, echo 44h), left Shift + 1 (HID 02 / 1E, echo 21h; another code is
 //                       a FAIL, amendment A10), each echoed in the cell after the prompt (timeout 300 ms),
-//                       released, 10 ms pause; snap("keys"), simout/ram_keys.hex
-//           The pictures are compared with the reference rendering on the host (tools/render.py).
+//                       released, 10 ms pause; snap("keys"), simout/ram_keys.hex; then snap("keys2") of the
+//                       frame after the next change of the picture (the other cursor phase), ram_keys2.hex
+//           The RAM 0000-7FFF at every event: simout/ev_<n>_<name>.hex (L1 of tools/compare_runs.py).
+//           The pictures and the screen text are checked on the host (tools/run_host_checks.py: render.py,
+//           screen.py golden text); their verdict is a part of the run verdict.
+// +STOP_AT=<cycle> ends any chain there (detail runs of the L0 comparison).
 // Idle link after CMD_INIT_DONE (karabas-go-firmware docs/protocol.md section 2, link_poll(); RTC section 6):
 // a CMD_NOP frame when the link was idle for +NOP_US=<us> (default 100; 0 = off; the period of the
 // firmware main loop is not known, an assumption), the RTC time registers every 500 ms (the phase of that
@@ -166,7 +170,14 @@ task rom_compare;
 	end
 endtask
 
-// the core start sequence of the firmware (karabas-go-firmware docs/protocol.md, section 3: do_configure)
+// the core start sequence of the firmware, in the order of its code (karabas-go-firmware
+// src/fpga/core_loader.c configure() and read_core()): CMD_CAPS query, CMD_INIT_START, CMD_HW_SETUP 0 / 1,
+// [OSD font], read_core(): rtc_send_all(), core_send_all() (the switches in the order of the OSD items),
+// rtc_send_all() again, [send_build_ids()], read_roms(): CMD_ROMLOADER 1, the ROM bursts, CMD_ROMLOADER 0;
+// the keyboard cleared (CMD_USB_KBD 0..6 = 0); CMD_INIT_DONE. docs/protocol.md section 3 puts the switches
+// and the RTC after the ROMs: the documentation and the code disagree; the TB follows the code.
+// Not sent: the OSD font (the OSD stays closed) and the build ids (CMD_HW_SETUP 10h-1Fh: no target in
+// mcu.vhd, which keeps only addresses 0 and 1).
 task prologue;
 	reg [8*8-1:0] s;
 	begin
@@ -184,7 +195,14 @@ task prologue;
 		link_frame(8'hFD, 8'h00, 8'h00);           // CMD_INIT_START
 		link_frame(8'hF9, 8'h00, HW_ID);           // CMD_HW_SETUP board
 		link_frame(8'hF9, 8'h01, 8'h00);           // CMD_HW_SETUP dvi_only
-		// (OSD font and build ids: not sent; the OSD stays closed, the build ids have no target in mcu.vhd)
+		mark_event("read_core");
+		rtc_all;                                   // rtc_send_all()
+		switch(8'h04, 8'h00);                      // core_send_all(): Text color 0
+		switch(8'h05, 8'h01);                      // Sound: on
+		switch(8'h06, 8'h00);                      // ROM: 0 (BIOSSD)
+		switch(8'h0A, 8'h00);                      // Autorun: off
+		switch(8'h0C, 8'h00);                      // Reset trigger: 0
+		rtc_all;                                   // rtc_send_all() again
 		mark_event("romload");
 		s = "";
 		if ($value$plusargs("ROMLOAD=%s", s) && s == "preload")
@@ -204,13 +222,7 @@ task prologue;
 		rom_done_cyc = cyc;
 		mark_event("rom_loaded");
 		rom_compare;
-		switch(8'h04, 8'h00);                      // Text color: 0
-		switch(8'h05, 8'h01);                      // Sound: on
-		switch(8'h06, 8'h00);                      // ROM: 0 (BIOSSD)
-		switch(8'h0A, 8'h00);                      // Autorun: off
-		switch(8'h0C, 8'h00);                      // Reset trigger: 0
-		rtc_all;                                   // the RTC registers (step 8)
-		kbd(8'h00, 8'h00);                         // keyboard cleared
+		kbd(8'h00, 8'h00);                         // keyboard cleared: modifiers + 6 key codes
 
 		link_frame(8'hFE, 8'h00, 8'h00);           // CMD_INIT_DONE
 		mark_event("init_done");
@@ -270,6 +282,7 @@ localparam [16:0] SB_LO = 17'h076D0;     // the screen buffer [76D0, 7FF4): 78 x
 localparam [16:0] SB_HI = 17'h07FF3;
 localparam integer SB_W = 78;
 localparam [8*10-1:0] BANNER = "radio-86rk";   // BIOS FF5A: 1F "radio-86rk", FF66: 0D 0A "-->"
+localparam [11:0] BANNER_OFS = 12'hF5B;          // FF5B in the loaded ROM (BIOSSD.BIN, ROM switch 0)
 
 reg cp1_armed = 1'b0, prompt_found = 1'b0;
 reg [16:0] prompt_a = 17'd0;
@@ -279,16 +292,30 @@ reg echo_armed = 1'b0, echo_seen = 1'b0;
 reg [16:0] echo_a = 17'd0;
 reg [7:0] echo_d = 8'd0;
 
+// the banner of the loaded ROM (the monitor prints these 10 bytes; a seeded ROM change shows up here)
 function banner_above(input [16:0] a);   // a: the address of the first '-'
 	integer i;
 	reg ok;
 	begin
 		ok = (a >= SB_LO + SB_W);
 		for (i = 0; i < 10; i = i + 1)
-			if (sram.mem[a - SB_W + i] !== BANNER[8*(9-i) +: 8]) ok = 1'b0;
+			if (sram.mem[a - SB_W + i] !== rom_biossd[BANNER_OFS + i]) ok = 1'b0;
 		banner_above = ok;
 	end
 endfunction
+// the loaded ROM must hold the stock banner (an error, the chain goes on)
+task banner_check;
+	integer i, nb;
+	begin
+		nb = 0;
+		for (i = 0; i < 10; i = i + 1)
+			if (rom_biossd[BANNER_OFS + i] !== BANNER[8*(9-i) +: 8]) nb = nb + 1;
+		if (nb) begin
+			$display("ERROR the banner of the loaded ROM at FF5B differs from \"radio-86rk\" in %0d bytes", nb);
+			nerr = nerr + 1;
+		end
+	end
+endtask
 
 always @(sram.wr_ev) begin
 	if (sram.wr_changed && ((sram.wr_a >= SB_LO && sram.wr_a <= SB_HI) ||
@@ -329,11 +356,41 @@ task picture(input [8*32-1:0] ev, input [8*32-1:0] name, input [8*40-1:0] fname)
 	end
 endtask
 
+// a second picture of the same screen in the other cursor phase (bounded: 450 ms, more than 2 x 192 ms)
+task resnap(input [8*32-1:0] ev, input [8*32-1:0] name, input [8*40-1:0] fname);
+	integer n0, f0;
+	reg [63:0] h0, t0;
+	begin
+		h0 = frames.snap_hash;
+		t0 = cyc;
+		n0 = nscr;
+		f0 = frames.nframes;
+		wait ((frames.nframes != f0 && frames.last_hash != h0) || cyc >= t0 + 64'd18000000);
+		if (frames.last_hash == h0) begin
+			$display("ERROR picture %0s: no frame with another hash within 450 ms after the snap", name);
+			nerr = nerr + 1;
+		end else begin
+			$display("PICTURE %0s: frame %0d has another hash than the last snap, %0d cycles after it", name,
+				frames.nframes - 1, cyc - t0);
+			mark_event(ev);
+			frames.snap_d(name, 64'd1);
+			dump_ram(fname);
+		end
+		if (nscr != n0) begin
+			$display("ERROR picture %0s: %0d changing writes into the screen buffer or the cursor before the snap", name,
+				nscr - n0);
+			nerr = nerr + 1;
+		end
+	end
+endtask
+
 // CP3: the field attributes (transparent mode of the BIOS setup, fillattr = 0): a code 80h-BFh takes a
 // column and shows the byte after it (read into the CRT fifo); every row ends with the end-of-row code F1h
 // at byte 77, so that each row still takes 78 bytes of the DMA count (2340 bytes, autoload) and the picture
 // does not move (k580wg75.v:143-153, 162-168; k580wt57.v autoload); each field is reset (80h) before the
-// row end, so no attribute carries into the next row. 10 codes in the frame.
+// row end, so no attribute carries into the next row. Rows 28 and 29 only, below the text area of the
+// monitor (rows 3-27); 11 codes in the frame (the CRT fifo has 16 places). tools/screen.py holds the same
+// bytes as its golden text.
 // +CP3_EOR=0 (debugging): no end-of-row code (byte 77 is a space), so each code takes one more byte
 reg cp3_eor = 1'b1;
 initial begin : cp3_opt
@@ -344,6 +401,8 @@ task poke_row(input integer row, input integer n, input [8*78-1:0] b);
 	integer i;
 	reg [16:0] a;
 	begin
+		// length guard: n must be the byte count of the concatenation (nothing above it, its first byte not 0)
+		if ((b >> (8 * n)) !== 0 || b[8*(n-1) +: 8] === 8'h00) fatal("poke_row: n is not the length of the row bytes");
 		a = SB_LO + row * SB_W;
 		for (i = 0; i < 78; i = i + 1)
 			sram.poke(a + i, (i < n) ? b[8*(n-1-i) +: 8] : ((i == 77 && cp3_eor) ? 8'hF1 : 8'h20));
@@ -351,15 +410,14 @@ task poke_row(input integer row, input integer n, input [8*78-1:0] b);
 endtask
 task cp3_poke;
 	begin
-		// row 27: NORMAL, inverse (90h), reset (80h), underline (A0h), reset
-		poke_row(27, 52, {"        NORMAL ", 8'h90, "INVERSE FIELD", 8'h80, " AFTER ", 8'hA0, "UNDERLINE",
+		// row 28: normal text, inverse (90h), reset (80h), underline (A0h), reset, blink (82h), reset
+		poke_row(28, 54, {"  NORMAL ", 8'h90, "INVERSE FIELD", 8'h80, " ", 8'hA0, "UNDERLINE", 8'h80, " ",
+			8'h82, "BLINK FIELD", 8'h80, " END"});
+		// row 29: the pseudographics 00h-1Fh, inverse pseudographics (90h), reset, inverse + underline (B0h),
+		// underline + blink (A2h), reset
+		poke_row(29, 69, {"  ", 64'h0001020304050607, 64'h08090A0B0C0D0E0F, 64'h1011121314151617,
+			64'h18191A1B1C1D1E1F, " ", 8'h90, 64'h0102030405060708, 8'h80, " ", 8'hB0, "REV+UND", 8'hA2, "UND+BLINK",
 			8'h80, " END"});
-		// row 28: blink (82h), reset, the pseudographics 00h-1Fh
-		poke_row(28, 54, {"        ", 8'h82, "BLINK FIELD", 8'h80, " ",
-			64'h0001020304050607, 64'h08090A0B0C0D0E0F, 64'h1011121314151617, 64'h18191A1B1C1D1E1F});
-		// row 29: inverse pseudographics, reset, inverse + underline (B0h), underline + blink (A2h), reset
-		poke_row(29, 48, {"        ", 8'h90, 64'h0102030405060708, 8'h80, " MIXED ", 8'hB0, "REV+UND", 8'hA2,
-			"UND+BLINK", 8'h80, " END"});
 	end
 endtask
 
@@ -399,6 +457,7 @@ task chain_basic;
 	integer nx, ok, i;
 	reg [63:0] t0;
 	begin
+		banner_check;
 		// CP1
 		cp1_armed = 1'b1;
 		t0 = cyc;
@@ -422,6 +481,11 @@ task chain_basic;
 			type_key(8'h00, 8'h07, 8'h44, "key_D");
 			type_key(8'h02, 8'h1E, 8'h21, "key_shift_1");
 			picture("snap_keys", "keys", "simout/ram_keys.hex");
+			// the cursor blinks with frame[3] of the CRT (8 CRT frames on, 8 off): snap "keys" may show it off.
+			// Wait for the first frame whose hash differs from the snapped one (the cursor phase changed; the
+			// blink fields change only together with it), then snap the next frame that starts after that:
+			// one of "keys" / "keys2" shows the cursor on at its new position (tools/render.py checks it)
+			resnap("snap_keys2", "keys2", "simout/ram_keys2.hex");
 		end
 		mark_event("basic_end");
 		xcheck_regs("basic_end", nx);
@@ -447,6 +511,25 @@ initial begin : chain_limit
 	fatal("chain time limit (+MAX_MS) reached");
 end
 
+// +STOP_AT=<cycle>: end the run at that cycle (detail runs of compare_runs.py with +TRACE_FROM / +TRACE_TO):
+// the outputs are flushed and the RESULT line says STOPPED, so the run has no PASS verdict
+initial begin : stop_at
+	reg [63:0] sa;
+	reg [8*16-1:0] c;
+	if ($value$plusargs("STOP_AT=%d", sa)) begin
+		c = "smoke";
+		if ($value$plusargs("CHAIN=%s", c)) ;
+		wait (cyc >= sa);
+		trace.finish;
+		frames.finish;
+		sram.flush;
+		$fflush(fev);
+		$display("TB_CYCLES %0d", cyc);
+		$display("RESULT %0s STOPPED at +STOP_AT=%0d", c, sa);
+		$finish;
+	end
+end
+
 initial begin : chain
 	integer nx;
 	fev = $fopen("simout/events.txt", "w");
@@ -454,6 +537,7 @@ initial begin : chain
 	$readmemh("roms/BIOS.hex", rom_bios);
 	chain_name = "smoke";
 	if ($value$plusargs("CHAIN=%s", chain_name)) ;
+	ev_dump = (chain_name == "basic");
 	prologue;
 	xcheck_regs("prologue_end", nx);
 	if (chain_name == "smoke")

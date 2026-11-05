@@ -58,14 +58,22 @@ initial begin
 		$rtoi($realtime * 1000.0), $rtoi($realtime * 1000.0) % 2500);
 end
 
-// events
-integer fev = 0;
+// events; with ev_dump = 1 (chain basic) also the RAM 0000-7FFF at each event: simout/ev_<n>_<name>.hex
+// (L1 of tools/compare_runs.py compares them event by event)
+integer fev = 0, nev = 0;
+reg ev_dump = 1'b0;
 reg [8*32-1:0] last_event = "start";
+reg [8*64-1:0] ev_fname;
 task mark_event(input [8*32-1:0] name);
 	begin
 		$fwrite(fev, "%0d %0s\n", cyc, name);
 		last_event = name;
 		$display("EVENT %0s cycle %0d (t=%0t)", name, cyc, $time);
+		if (ev_dump) begin
+			$sformat(ev_fname, "simout/ev_%0d_%0s.hex", nev, name);
+			sram.dump(ev_fname, 0, 32767);
+		end
+		nev = nev + 1;
 	end
 endtask
 
