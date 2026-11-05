@@ -2,11 +2,12 @@
 // System testbench of the RK86 core: the unchanged board top, an SRAM model, the MCU side of the link,
 // the L0 pin trace, the frame capture and the chained scenario (chain.vh).
 // fuse -d BOARD_GO (board_go.vh); BOARD_MINIG comes with board_minig.vh (plan Task 6).
-// Outputs in simout/: events.txt ("<cycle> <name>"), trace.txt, frames.txt, sram_wr.txt.
+// Outputs in simout/: events.txt ("<cycle> <name>"), trace.txt, frames.txt, sram_wr.txt; chain basic also
+// snaps.txt (the pixels of the snapped frames) and ram_<picture>.hex (RAM 0000-7FFF at each picture).
 // The run ends with "TB_CYCLES <n>" and "RESULT <chain> PASS|FAIL ..." in the log; every fatal stop (fatal())
 // prints "RESULT <chain> FAIL fatal". Watchdogs: the reference clock must advance (counted on the board
 // clock of the TB, tbclk), and a time limit per chain (chain.vh, +MAX_MS).
-// Plusargs: +CHAIN=smoke (default), +SMOKE_MS, +MAX_MS (chain.vh), +RAM_INIT, +ROMLOAD=preload, +SRAM_LOG=0 (sram_model.v),
+// Plusargs: +CHAIN=smoke (default) | basic, +SMOKE_MS, +MAX_MS, +NOP_US, +CP3_EOR=0 (chain.vh), +RAM_INIT, +ROMLOAD=preload, +SRAM_LOG=0 (sram_model.v),
 // +TRACE_FROM / +TRACE_TO (pin_trace.v), +VCD_FROM=<cycle> +VCD_TO=<cycle> (simout/tb.vcd of the whole
 // TB hierarchy, debugging only).
 module tb_sys;

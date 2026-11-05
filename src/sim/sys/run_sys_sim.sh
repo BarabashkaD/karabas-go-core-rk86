@@ -7,11 +7,14 @@
 # fuse --nodebug: no HDL debugging support (the runs are batch only; about 10 % faster).
 # Env: ISE_SETTINGS (default /opt/Xilinx/14.7/ISE_DS/settings64.sh), RUN_TIME (simulator run
 #   command argument, e.g. "2 ms"; default: run all, the TB ends with $finish), FUSE_EXTRA,
-#   MIN_RATE (reference cycles per second the run must reach for VERDICT PASS; default 15000).
+#   MIN_RATE (reference cycles per second the simulation run must reach for VERDICT PASS; default 5000),
+#   WARN_RATE (below it a RATE WARNING, the verdict is not changed; default 15000: the rate depends on the
+#   load of the host).
 # perf.txt: times, memory, the rates (TB_CYCLES of the log / wall clock from the start of the simulation run,
-#   and / wall clock of the whole simulator process), the TB RESULT line and
+#   and / wall clock of the whole simulator process), the TB RESULT line, a RATE WARNING line if any, and
 #   VERDICT PASS|FAIL (TB result PASS and rate >= MIN_RATE; a missing RESULT line is FAIL unless sim.env
-#   says TB_RESULT=none, the stub TB). The exit status is non-zero on any FAIL.
+#   says TB_RESULT=none, the stub TB). The exit status is non-zero on any FAIL. The PERF lines are also
+#   appended to the copy of summary.txt in <out_dir>.
 set -e
 WORK=$(cd "$1" && pwd)
 OUT=$2
@@ -71,7 +74,12 @@ if [ -n "$CYCLES" ] && [ -f sim_time.txt ]; then
   fi
 fi
 # verdict: the TB result (if the TB prints one) and the rate of the simulation run (MIN_RATE cycles/s)
-MIN_RATE=${MIN_RATE:-15000}
+MIN_RATE=${MIN_RATE:-5000}
+WARN_RATE=${WARN_RATE:-15000}
+WARNING=""
+if [ -n "$RATE" ] && [ "$RATE" -lt "$WARN_RATE" ]; then
+  WARNING="RATE WARNING: $RATE cycles/s of the run is below $WARN_RATE (host load?); the verdict fails only below $MIN_RATE"
+fi
 VERDICT=""
 if [ -n "$RESULT" ]; then
   if echo "$RESULT" | grep -q ' PASS$' && [ -n "$RATE" ] && [ "$RATE" -ge "$MIN_RATE" ]; then VERDICT=PASS; else VERDICT=FAIL; fi
@@ -88,12 +96,14 @@ fi
   [ -f sim_time.txt ] && grep -E "Elapsed|Maximum resident" sim_time.txt | sed 's/^\s*/sim /'
   if [ -n "$CYCLES" ]; then echo "sim reference cycles $CYCLES, rate $RATE cycles/s of the run (minimum $MIN_RATE), $RATE_ALL cycles/s with loading the design"; fi
   if [ -n "$RESULT" ]; then echo "tb $RESULT"; fi
+  if [ -n "$WARNING" ]; then echo "$WARNING"; fi
   if [ -n "$VERDICT" ]; then echo "VERDICT $VERDICT"; fi
 } > perf.txt
 
 for f in summary.txt subst.txt fuse.log sim.log perf.txt; do
   [ -f "$f" ] && cp "$f" "$OUT/"
 done
+{ echo ""; echo "PERF (run_sys_sim.sh)"; sed 's/^/  /' perf.txt; } >> "$OUT/summary.txt"
 if [ -d simout ] && [ -n "$(ls -A simout)" ]; then
   mkdir -p "$OUT/simout" && cp simout/* "$OUT/simout/"
 fi

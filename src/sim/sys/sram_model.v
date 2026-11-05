@@ -11,6 +11,7 @@
 //   poke(addr, data)       write without a bus cycle
 // Counters for the TB: nwr (transactions), nchg (changing ones), nhigh (access above 128K),
 // nxwr / nxwr_chk (a write strobe, address or data with X / Z; _chk: while chk = 1).
+// Event wr_ev with wr_a / wr_d / wr_changed: every write transaction (the lines of the log).
 module sram_model(
 	input refclk,
 	input [63:0] cyc,
@@ -29,6 +30,12 @@ reg prev_low = 1'b0;
 reg [20:0] pa;
 reg [7:0] pd;
 reg changed;
+// the last write transaction (one per log line, also without the log): wr_ev fires after the
+// memory holds the new value
+event wr_ev;
+reg [16:0] wr_a = 17'd0;
+reg [7:0] wr_d = 8'd0;
+reg wr_changed = 1'b0;
 
 assign md = (!mrd_n && mwr_n) ? mem[ma[16:0]] : 8'hzz;    // X on a strobe gives X on md
 
@@ -64,6 +71,11 @@ always @(negedge refclk) begin
 				nwr = nwr + 1;
 				if (changed) nchg = nchg + 1;
 				if (log_en) $fwrite(flog, "%0d %05h %02h %0d\n", cyc, ma[16:0], md, changed);
+				mem[ma[16:0]] = md;
+				wr_a = ma[16:0];
+				wr_d = md;
+				wr_changed = changed;
+				-> wr_ev;
 			end
 			mem[ma[16:0]] = md;
 		end

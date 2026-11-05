@@ -9,6 +9,10 @@
 //   snap(name)   blocks until the first complete frame that started at least SNAP_DELAY cycles after
 //                the call (24 ms: one CRT frame) has ended; that frame is tagged with the name; a fatal
 //                stop if it has not ended 4 VGA frames after that
+// simout/snaps.txt: the pixels of every snapped frame, for tools/render.py:
+//   "SNAP <name> <frame> <start cycle>", then "<line> <x> <rgb hex>" on the first sample and on every
+//   change of rgb (line: rising edges of hs since the rising edge of vs, from 0; x: samples since the
+//   last rising edge of hs, from 0), then "END <frame> <cycles> <lines> <hash>"
 module frame_capture #(
 	parameter integer H_TOTAL = 1057,
 	parameter integer V_TOTAL = 629,
@@ -51,7 +55,15 @@ function [63:0] fold(input [63:0] h0, input [63:0] w);
 	end
 endfunction
 
-initial ffr = $fopen("simout/frames.txt", "w");
+// pixels of the snapped frames
+integer fsnap = 0;
+reg dumping = 1'b0, dfirst = 1'b1;
+reg [23:0] dprgb = 24'd0;
+
+initial begin
+	ffr = $fopen("simout/frames.txt", "w");
+	fsnap = $fopen("simout/snaps.txt", "w");
+end
 
 always @(negedge refclk) begin
 	hcnt = hcnt + 1;
@@ -76,6 +88,10 @@ always @(negedge refclk) begin
 				if (nbad_v <= 10) $display("VIDEO frame of %0d lines (expected %0d) at cycle %0d", lines, V_TOTAL, cyc);
 			end
 			$fwrite(ffr, "F %0d %0d %0d %0d %h %0s", nframes, fstart, cyc - fstart, lines, fh, last_event);
+			if (dumping) begin
+				$fwrite(fsnap, "END %0d %0d %0d %h\n", nframes, cyc - fstart, lines, fh);
+				dumping = 1'b0;
+			end
 			if (snap_pending && fstart >= snap_after) begin
 				$fwrite(ffr, " snap %0s", snap_name);
 				$display("SNAP %0s: frame %0d, start cycle %0d, hash %h", snap_name, nframes, fstart, fh);
@@ -90,12 +106,23 @@ always @(negedge refclk) begin
 		fstart = cyc;
 		lines = 0;
 		prgb = 24'd0;
+		// the frame of a pending snap (the first that starts SNAP_DELAY after the call) is dumped
+		if (snap_pending && cyc >= snap_after) begin
+			dumping = 1'b1;
+			$fwrite(fsnap, "SNAP %0s %0d %0d\n", snap_name, nframes, cyc);
+		end
 	end
 	if (seen_vs && rgb !== prgb) begin
 		fh = fold(fh, cyc - fstart);
 		fh = fold(fh, {16'd0, cx, cv});
 		prgb = rgb;
 	end
+	if (dumping && (rgb !== dprgb || dfirst)) begin
+		$fwrite(fsnap, "%0d %0d %h\n", lines, hcnt, rgb);
+		dprgb = rgb;
+		dfirst = 1'b0;
+	end
+	if (!dumping) dfirst = 1'b1;
 	phs = hs;
 	pvs = vs;
 end
@@ -113,6 +140,9 @@ task snap(input [8*32-1:0] name);
 endtask
 
 task finish;
-	$fflush(ffr);
+	begin
+		$fflush(ffr);
+		$fflush(fsnap);
+	end
 endtask
 endmodule
