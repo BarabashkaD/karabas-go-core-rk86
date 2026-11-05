@@ -5,7 +5,7 @@ ADC_DOUT,,-,y,y,sound,platform,per-board mixing differs
 adc_l,,-,y,y,sound,platform,per-board mixing differs
 ADC_LRCK,,-,y,y,sound,platform,per-board mixing differs
 adc_r,,-,y,y,sound,platform,per-board mixing differs
-addrbus,,y,y,y,machine,planned:rk86_machine.cpu_a;platform,also the SRAM mux and the SD window in the top
+addrbus,,y,y,y,machine,rk86_machine.cpu_a;platform,also the SRAM mux and the SD window in the top
 areset,,y,y,y,platform,karabas_keyboard.areset;platform,also used by the platform
 AUDIO_L,,-,y,-,sound,platform,per-board mixing differs
 audio_mix_l,,-,y,y,sound,platform,per-board mixing differs
@@ -16,36 +16,19 @@ AUDIO_R,,-,y,-,sound,platform,per-board mixing differs
 BEEPER,,y,-,-,sound,platform,per-board mixing differs
 clk12,,y,y,y,platform,platform,
 clk25,,y,y,y,platform,platform,
-clk50,,y,y,y,platform,planned:rk86_machine.clk;karabas_keyboard.clk;platform,the only clock
+clk50,,y,y,y,platform,rk86_machine.clk;karabas_keyboard.clk;platform,the only clock
 CLK_50MHZ,,y,y,y,platform,platform,
 clk_hdmi,,-,y,y,video,platform,
 clk_hdmi_n,,-,y,y,video,platform,
-cpu_ce,,y,y,y,machine,internal:rk86_machine,machine internal
-cpu_ce2,,y,y,y,machine,internal:rk86_machine,machine internal
-cpu_cnt,,y,y,y,machine,internal:rk86_machine,machine internal
-cpu_i,,y,y,y,machine,internal:rk86_machine,machine internal
-cpu_int,,y,y,y,machine,internal:rk86_machine,"undriven, intr=0"
-cpu_inta_n,,y,y,y,machine,internal:rk86_machine,machine internal
-cpu_o,,y,y,y,machine,planned:rk86_machine.cpu_do;platform,CPU data out; also memory write data and SD window in the top
-cpu_rd,,y,y,y,machine,planned:rk86_machine.cpu_rd;platform,SD reads on unqualified cpu_rd
-cpu_sync,,y,y,y,machine,internal:rk86_machine,machine internal
-cpu_wr_n,,y,y,y,machine,planned:rk86_machine.cpu_wr_n;platform,also used by the board memory glue
+cpu_o,,y,y,y,machine,rk86_machine.cpu_do;platform,CPU data out; also memory write data and SD window in the top
+cpu_rd,,y,y,y,machine,rk86_machine.cpu_rd;platform,SD reads on unqualified cpu_rd
+cpu_wr_n,,y,y,y,machine,rk86_machine.cpu_wr_n;platform,also used by the board memory glue
 cpurst,,y,y,y,platform,platform,"the OSD soft switch Reset (soft_switches); feeds the reset counter and the loader reset"
-crt_o,,y,y,y,machine,internal:rk86_machine,machine internal
-crt_rd_n,,y,y,y,machine,internal:rk86_machine,machine internal
-crt_we_n,,y,y,y,machine,internal:rk86_machine,machine internal
 DAC_BCK,,y,-,y,sound,platform,per-board mixing differs
 DAC_DAT,,y,-,y,sound,platform,per-board mixing differs
 DAC_LRCK,,y,-,-,sound,platform,per-board mixing differs
 DAC_MUTE,,y,-,-,sound,platform,per-board mixing differs
 DAC_WS,,-,-,y,sound,platform,per-board mixing differs
-dma_dack,,y,y,y,machine,internal:rk86_machine,machine internal
-dma_o,,y,y,y,machine,internal:rk86_machine,machine internal
-dma_oiord_n,,y,y,y,machine,internal:rk86_machine,machine internal
-dma_oiowe_n,,y,y,y,machine,internal:rk86_machine,machine internal
-dma_ord_n,,y,y,y,machine,internal:rk86_machine,machine internal
-dma_owe_n,,y,y,y,machine,internal:rk86_machine,machine internal
-dma_we_n,,y,y,y,machine,internal:rk86_machine,machine internal
 dvi_blue,,-,y,y,video,platform,
 dvi_green,,-,y,y,video,platform,
 dvi_only,,-,y,y,video,platform,
@@ -90,7 +73,6 @@ FT_SPI_CS_N,,y,y,y,platform,platform,
 FT_SPI_MISO,,y,y,y,platform,platform,
 FT_SPI_MOSI,,y,y,y,platform,platform,
 FT_SPI_SCK,,y,y,y,platform,platform,
-hdla,,y,y,y,machine,internal:rk86_machine,a typo of hlda; unused
 hid_kb_dat0,,y,y,y,keyboard,karabas_keyboard.hid_kb_dat0;platform,from the MCU
 hid_kb_dat1,,y,y,y,keyboard,karabas_keyboard.hid_kb_dat1;platform,from the MCU
 hid_kb_dat2,,y,y,y,keyboard,karabas_keyboard.hid_kb_dat2;platform,from the MCU
@@ -98,20 +80,18 @@ hid_kb_dat3,,y,y,y,keyboard,karabas_keyboard.hid_kb_dat3;platform,from the MCU
 hid_kb_dat4,,y,y,y,keyboard,karabas_keyboard.hid_kb_dat4;platform,from the MCU
 hid_kb_dat5,,y,y,y,keyboard,karabas_keyboard.hid_kb_dat5;platform,from the MCU
 hid_kb_status,,y,y,y,keyboard,karabas_keyboard.hid_kb_status;platform,from the MCU
-hlda,,y,y,y,machine,internal:rk86_machine,machine internal
-hldareg,,y,y,y,machine,internal:rk86_machine,machine internal
 host_video_b,,-,y,y,video,platform,
 host_video_blank,,-,y,y,video,platform,
 host_video_g,,-,y,y,video,platform,
 host_video_hs,,-,y,y,video,platform,
 host_video_r,,-,y,y,video,platform,
 host_video_vs,,-,y,y,video,platform,
-inte,,y,y,y,sound,planned:rk86_machine.inte;platform,"sound source, mixed in the board"
+inte,,y,y,y,sound,rk86_machine.inte;platform,"sound source, mixed in the board"
 joy_l,,y,y,y,keyboard,karabas_keyboard.joy_l;platform,from the MCU
 joy_r,,y,y,y,keyboard,karabas_keyboard.joy_r;platform,from the MCU
 joy_rst,,y,y,y,keyboard,karabas_keyboard.joy_rst;platform,also used by the platform
-kbd_o,,y,y,y,keyboard,planned:rk86_machine.kbd_cols;karabas_keyboard.kbd_cols,keyboard columns
-kbd_shift,,y,y,y,keyboard,planned:rk86_machine.kbd_shift;karabas_keyboard.kbd_shift,PC7..PC5
+kbd_o,,y,y,y,keyboard,rk86_machine.kbd_cols;karabas_keyboard.kbd_cols,keyboard columns
+kbd_shift,,y,y,y,keyboard,rk86_machine.kbd_shift;karabas_keyboard.kbd_shift,PC7..PC5
 load_a,,y,y,y,memory,platform,stays in the board top
 load_d,,y,y,y,memory,platform,stays in the board top
 load_wr,,y,y,y,memory,platform,stays in the board top
@@ -130,7 +110,7 @@ MCU_MISO,,y,y,y,platform,platform,
 MCU_MOSI,,y,y,y,platform,platform,
 MCU_SCK,,y,y,y,platform,platform,
 MD,,y,y,y,memory,platform,stays in the board top
-mem_o,,y,y,y,memory,planned:rk86_machine.mem_di;platform,to the CPU and to the CRT
+mem_o,,y,y,y,memory,rk86_machine.mem_di;platform,to the CPU and to the CRT
 MIDI_CLK,,y,y,-,platform,platform,
 MIDI_RESET_N,,y,y,-,platform,platform,
 MIDI_TX,,y,y,y,platform,platform,
@@ -138,17 +118,13 @@ MRD_N,,y,y,y,memory,platform,stays in the board top
 MWR_N,,y,y,y,memory,platform,stays in the board top
 osd_act,,y,y,y,keyboard,karabas_keyboard.osd_act;platform,also used by the platform
 osd_command,,y,y,y,platform,platform,
-ppa1_a,,y,y,y,machine,planned:rk86_machine.ppa_pa;karabas_keyboard.ppa_pa,keyboard rows
-ppa1_b,,y,y,y,machine,internal:rk86_machine,machine internal
-ppa1_c,0,y,y,y,sound,planned:rk86_machine.pc0;platform,sound and TAPE_OUT
-ppa1_c,7:1,y,y,y,machine,internal:rk86_machine,PC1..PC3 feed back to ipc; PC4..PC7 outputs unused
-ppa1_o,,y,y,y,machine,internal:rk86_machine,machine internal
-ppa1_we_n,,y,y,y,machine,internal:rk86_machine,machine internal
-ppa2_we_n,,y,y,y,machine,planned:rk86_machine.ext_we_n;platform,SD window write
-reset,,y,y,y,platform,planned:rk86_machine.reset;platform,composed by the board
+pc0,,y,y,y,sound,rk86_machine.pc0;platform,PC0 of the PPI: sound and TAPE_OUT
+ppa1_a,,y,y,y,machine,rk86_machine.ppa_pa;karabas_keyboard.ppa_pa,keyboard rows
+ppa2_we_n,,y,y,y,machine,rk86_machine.ext_we_n;platform,SD window write
+reset,,y,y,y,platform,rk86_machine.reset;platform,composed by the board
 reset_cnt,,y,y,y,platform,platform,reset composition stays in the board top
 reset_n,,y,y,y,platform,platform,reset composition stays in the board top
-rom,,y,y,y,machine,planned:rk86_machine.rom;platform,"ROM area read select, used by the board memory mux"
+rom,,y,y,y,machine,rk86_machine.rom;platform,"ROM area read select, used by the board memory mux"
 rom_a,,y,y,y,memory,platform,stays in the board top
 rom_sel,,y,y,y,memory,platform,"OSD ROM select, stays in the board top"
 SD_CLK,,y,y,y,platform,platform,
@@ -156,7 +132,7 @@ SD_CS_N,,y,y,y,platform,platform,
 SD_DET_N,,y,y,y,platform,platform,
 SD_DI,,y,y,y,platform,platform,
 SD_DO,,y,y,y,platform,platform,
-sd_o,,y,y,y,platform,planned:rk86_machine.ext_di;platform,SD window read data
+sd_o,,y,y,y,platform,rk86_machine.ext_di;platform,SD window read data
 sdclk,,y,y,y,platform,platform,
 sdcmd,,y,y,y,platform,platform,
 sdcs,,y,y,y,platform,platform,
@@ -171,8 +147,8 @@ SDR_RAS_N,,y,y,y,platform,platform,
 SDR_WE_N,,y,y,y,platform,platform,
 softsw_command,,y,y,y,platform,platform,
 sound,,y,y,y,sound,platform,per-board mixing differs
-startup,,y,y,y,machine,planned:rk86_machine.startup;platform,"startup flag, also used by the ROM address in the board"
-TAPE_IN,,y,y,y,platform,planned:rk86_machine.tape_in,PC4
+startup,,y,y,y,machine,rk86_machine.startup;platform,"startup flag, also used by the ROM address in the board"
+TAPE_IN,,y,y,y,platform,rk86_machine.tape_in,PC4
 TAPE_OUT,,y,y,y,sound,platform,per-board mixing differs
 tmds_blue,,-,y,y,video,platform,
 tmds_green,,-,y,y,video,platform,
@@ -190,23 +166,21 @@ VGA_G,,y,y,y,video,platform,
 VGA_HS,,y,y,y,video,platform,
 VGA_R,,y,y,y,video,platform,
 VGA_VS,,y,y,y,video,platform,
-vid_addr,,y,y,y,machine,planned:rk86_machine.vid_a;platform,video DMA steals the SRAM
-vid_cce,,y,y,y,video,planned:rk86_machine.cce;platform,"from rk_video, clocks DMA and CRT"
-vid_char,,y,y,y,video,planned:rk86_machine.ochar;platform,to rk_video
-vid_do,,y,y,y,machine,internal:rk86_machine,machine internal
-vid_drq,,y,y,y,machine,internal:rk86_machine,machine internal
-vid_gattr,,y,y,y,video,planned:rk86_machine.gattr;platform,unused today
-vid_hilight,,y,y,y,video,planned:rk86_machine.hilight;platform,unused today
-vid_hr,,y,y,y,video,planned:rk86_machine.hrtc;platform,CRT sync input from rk_video
-vid_irq,,y,y,y,video,planned:rk86_machine.irq;platform,unused today
-vid_lattr,,y,y,y,video,planned:rk86_machine.lattr;platform,unused today
-vid_line,,y,y,y,video,planned:rk86_machine.line;platform,to rk_video
-vid_lten,,y,y,y,video,planned:rk86_machine.lten;platform,to rk_video
+vid_addr,,y,y,y,machine,rk86_machine.vid_a;platform,video DMA steals the SRAM
+vid_cce,,y,y,y,video,rk86_machine.cce;platform,"from rk_video, clocks DMA and CRT"
+vid_char,,y,y,y,video,rk86_machine.ochar;platform,to rk_video
+vid_gattr,,y,y,y,video,rk86_machine.gattr;platform,unused today
+vid_hilight,,y,y,y,video,rk86_machine.hilight;platform,unused today
+vid_hr,,y,y,y,video,rk86_machine.hrtc;platform,CRT sync input from rk_video
+vid_irq,,y,y,y,video,rk86_machine.irq;platform,unused today
+vid_lattr,,y,y,y,video,rk86_machine.lattr;platform,unused today
+vid_line,,y,y,y,video,rk86_machine.line;platform,to rk_video
+vid_lten,,y,y,y,video,rk86_machine.lten;platform,to rk_video
 vid_pix,,y,y,y,video,platform,
-vid_rd,,y,y,y,machine,planned:rk86_machine.vid_rd;platform,video DMA steals the SRAM
-vid_rvv,,y,y,y,video,planned:rk86_machine.rvv;platform,to rk_video
-vid_vr,,y,y,y,video,planned:rk86_machine.vrtc;platform,CRT sync input from rk_video
-vid_vsp,,y,y,y,video,planned:rk86_machine.vsp;platform,to rk_video
+vid_rd,,y,y,y,machine,rk86_machine.vid_rd;platform,video DMA steals the SRAM
+vid_rvv,,y,y,y,video,rk86_machine.rvv;platform,to rk_video
+vid_vr,,y,y,y,video,rk86_machine.vrtc;platform,CRT sync input from rk_video
+vid_vsp,,y,y,y,video,rk86_machine.vsp;platform,to rk_video
 video_b,,y,y,y,video,platform,
 video_g,,y,y,y,video,platform,
 video_r,,y,y,y,video,platform,

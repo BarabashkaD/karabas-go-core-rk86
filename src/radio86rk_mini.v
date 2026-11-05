@@ -125,7 +125,7 @@ module radio86rk_mini(
 );
 
 //assign BEEPER = (ppa1_c[0]^inte)&sound;
-assign TAPE_OUT = ppa1_c[0];
+assign TAPE_OUT = pc0;
 
 assign ESP_RESET_N = 1'b1;
 assign ESP_BOOT_N = 1'b1;
@@ -172,18 +172,15 @@ wire [7:0] hid_kb_dat3;
 wire [7:0] hid_kb_dat4;
 wire [7:0] hid_kb_dat5;
 
-reg startup;
+wire startup;
 
-wire hdla;
 wire cpurst;
 wire videomode;
 wire sound;
-wire[1:0] rom_sel; 
+wire[1:0] rom_sel;
 
-wire[7:0] ppa1_o;
 wire[7:0] ppa1_a;
-wire[7:0] ppa1_b;
-wire[7:0] ppa1_c;
+wire pc0;
 
 wire [7:0] video_r;
 wire [7:0] video_g;
@@ -376,89 +373,27 @@ loader loader(.reset((cpurst | joy_rst)),.clk50(clk50),.loader_act(loader_act),.
 				  .sram_a(load_a),.sram_wr(load_wr),.sram_d(load_d),.loading(loading),.done(loaded_done)
 				  );
 				  
-//--------- CPU ---------------------
+//--------- CPU (in rk86_machine) ---------------------
 wire[15:0] addrbus;
 wire[7:0] cpu_o;
-wire cpu_sync;
 wire cpu_rd;
 wire cpu_wr_n;
-wire cpu_int;
-wire cpu_inta_n;
 wire inte;
-reg[7:0] cpu_i;
-
-reg rom;
-
-always @(*)
-   casex (addrbus[15:13])
-      3'b0xx: cpu_i = mem_o;
-      3'b100: cpu_i = ppa1_o;
-      3'b101: cpu_i = sd_o;
-      3'b110: cpu_i = crt_o;
-      3'b111: cpu_i = mem_o;
-   endcase
-	
-always @(*)
-   casex (addrbus[15:13])
-      3'b0xx:  rom = startup ? 1'b1: 1'b0;
-      3'b111:  rom = 1'b1;
-		default: rom = 1'b0;
-   endcase
-
-wire ppa1_we_n = addrbus[15:13]!=3'b100|cpu_wr_n;
-wire ppa2_we_n = addrbus[15:13]!=3'b101|cpu_wr_n;
-wire crt_we_n  = addrbus[15:13]!=3'b110|cpu_wr_n;
-wire crt_rd_n  = addrbus[15:13]!=3'b110|~cpu_rd;
-wire dma_we_n  = addrbus[15:13]!=3'b111|cpu_wr_n;
-
-reg[4:0] cpu_cnt;
-reg cpu_ce2;
-reg[10:0] hldareg;
-wire cpu_ce = cpu_ce2;
-
-always @(posedge clk50) begin
-	if(reset) begin cpu_cnt<=0; cpu_ce2<=0; hldareg<=11'd0; end
-	else
-   if((hldareg[10:9] == 2'b01) && ((cpu_rd == 1) || (cpu_wr_n == 0))) begin cpu_cnt <= 0; cpu_ce2 <= 1; end
-	else
-	if(cpu_cnt < 27) begin cpu_cnt <= cpu_cnt + 5'd1; cpu_ce2 <= 0; end
-	else begin cpu_cnt <= 0; cpu_ce2 <= ~hlda; end
-	hldareg <= {hldareg[9:0],hlda};
-	startup <= reset|(startup&~addrbus[15]);
-end
-
-k580wm80a CPU(.clk(clk50), .ce(cpu_ce), .reset(reset),
-   .idata(cpu_i), .addr(addrbus), .sync(cpu_sync), .rd(cpu_rd), .wr_n(cpu_wr_n),
-   .intr(cpu_int), .inta_n(cpu_inta_n), .odata(cpu_o), .inte_o(inte));
+wire rom;
+wire ppa2_we_n;
 
 //--------- VIDEO --------------
-wire[7:0] crt_o;
 wire[3:0] vid_line;
 wire[6:0] vid_char;
 wire[15:0] vid_addr;
-wire[3:0] dma_dack;
-wire[7:0] dma_o;
-wire[7:0] vid_do;
 wire[1:0] vid_lattr;
 wire[1:0] vid_gattr;
-wire vid_cce,vid_drq,vid_irq;
+wire vid_cce,vid_irq;
 wire vid_lten,vid_vsp,vid_rvv,vid_hilight;
-wire dma_owe_n,dma_ord_n,dma_oiowe_n,dma_oiord_n;
 
-wire vid_rd = ~dma_oiord_n;
-
-k580wt57 dma(.clk(clk50), .ce(vid_cce), .reset(reset),
-   .iaddr(addrbus[3:0]), .idata(cpu_o), .drq({1'b0,vid_drq,2'b00}), .iwe_n(dma_we_n), .ird_n(1'b1),
-   .hlda(hlda), .hrq(hlda), .dack(dma_dack), .odata(dma_o), .oaddr(vid_addr),
-   .owe_n(dma_owe_n), .ord_n(dma_ord_n), .oiowe_n(dma_oiowe_n), .oiord_n(dma_oiord_n) );
+wire vid_rd;
 
 wire vid_vr, vid_hr;
-
-k580wg75 crt(.clk(clk50), .ce(vid_cce),
-   .iaddr(addrbus[0]), .idata(cpu_o), .iwe_n(crt_we_n), .ird_n(crt_rd_n),
-   .vrtc(vid_vr), .hrtc(vid_hr), .dack(dma_dack[2]), .ichar(mem_o), .drq(vid_drq), .irq(vid_irq),
-   .odata(crt_o), .line(vid_line), .ochar(vid_char), .lten(vid_lten), .vsp(vid_vsp),
-   .rvv(vid_rvv), .hilight(vid_hilight), .lattr(vid_lattr), .gattr(vid_gattr) );
 
 wire vid_pix;
 wire[10:0] vga_counter_x;
@@ -487,11 +422,6 @@ assign video_r = vid_pix ? (videomode ? 8'b00100000 : 8'b10000000 ) : 8'b0000000
 assign video_g = vid_pix ? (videomode ? 8'b10000000 : 8'b10000000 ) : 8'b00000000;
 assign video_b = vid_pix ? (videomode ? 8'b00100000 : 8'b10000000 ) : 8'b00000000;
 
-//--------- SYS PPA --------------
-k580ww55 ppa1(.clk(clk50), .reset(reset), .addr(addrbus[1:0]), .we_n(ppa1_we_n),
-   .idata(cpu_o), .odata(ppa1_o), .ipa(ppa1_a), .opa(ppa1_a),
-   .ipb(kbd_o), .opb(ppa1_b), .ipc({kbd_shift,TAPE_IN,ppa1_c[3:0]}), .opc(ppa1_c));
-
 reg sdcs;
 reg sdclk;
 reg sdcmd;
@@ -518,6 +448,41 @@ always @(posedge clk50 or posedge reset) begin
    end
 end
 
+//--------- MACHINE --------------
+rk86_machine machine(
+	.clk(clk50),
+	.reset(reset),
+	.cce(vid_cce),
+	.hrtc(vid_hr),
+	.vrtc(vid_vr),
+	.cpu_a(addrbus),
+	.cpu_do(cpu_o),
+	.cpu_rd(cpu_rd),
+	.cpu_wr_n(cpu_wr_n),
+	.rom(rom),
+	.startup(startup),
+	.vid_a(vid_addr),
+	.vid_rd(vid_rd),
+	.mem_di(mem_o),
+	.ppa_pa(ppa1_a),
+	.kbd_cols(kbd_o),
+	.kbd_shift(kbd_shift),
+	.tape_in(TAPE_IN),
+	.pc0(pc0),
+	.inte(inte),
+	.line(vid_line),
+	.ochar(vid_char),
+	.lten(vid_lten),
+	.vsp(vid_vsp),
+	.rvv(vid_rvv),
+	.hilight(vid_hilight),
+	.lattr(vid_lattr),
+	.gattr(vid_gattr),
+	.irq(vid_irq),
+	.ext_we_n(ppa2_we_n),
+	.ext_di(sd_o)
+);
+
 //--------- OSD --------------
 
 overlay overlay(
@@ -538,8 +503,8 @@ assign ADC_BCK = 1'b0;
 assign ADC_LRCK = 1'b0;
 
 // ------- audio mix host
-assign audio_out_l = {2'b00, (ppa1_c[0]^inte)&sound, 13'd0};
-assign audio_out_r = {2'b00, (ppa1_c[0]^inte)&sound, 13'd0};
+assign audio_out_l = {2'b00, (pc0^inte)&sound, 13'd0};
+assign audio_out_r = {2'b00, (pc0^inte)&sound, 13'd0};
 assign audio_mix_l = audio_out_l[15:0];
 assign audio_mix_r = audio_out_r[15:0];
 

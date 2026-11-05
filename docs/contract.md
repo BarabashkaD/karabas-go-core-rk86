@@ -10,11 +10,11 @@ This document fixes the boundaries between a board-neutral machine, the Karabas 
 
 ## 2. Modules
 
-`karabas_keyboard` has its body, moved from the three tops without changes; the tops instantiate it. `rk86_machine` has no file yet: the module and its file `src/rtl/rk86_machine.v` come with the extraction of the machine, and the ports listed below are its agreed interface. Until then `docs/contract-signals.csv` marks its targets `planned:`.
+`karabas_keyboard` and `rk86_machine` have their bodies, moved from the three tops without changes; the tops instantiate them.
 
-### `rk86_machine` (planned)
+### `rk86_machine` (`src/rtl/rk86_machine.v`)
 
-It will contain the CPU `k580wm80a`, the DMA `k580wt57`, the CRT `k580wg75`, the PPI `k580ww55`, the CPU clock enable, the `startup` flag, the address decode and the ROM area select. It has no board dependency.
+It contains the CPU `k580wm80a`, the DMA `k580wt57`, the CRT `k580wg75`, the PPI `k580ww55`, the CPU clock enable, the `startup` flag, the address decode and the ROM area select. It has no board dependency. The body is the one of the board tops, moved without changes; at its start, aliases give the ports the former names of the tops (`clk50`, `mem_o`, `vid_cce`, `vid_hr`, `vid_vr`, `kbd_o`, `TAPE_IN`, `sd_o`), so that the moved code is unchanged.
 
 | Group | Ports |
 |---|---|
@@ -47,7 +47,7 @@ It contains the conversion of HID reports and joysticks from the MCU to the keyb
 
 ### `src/rk86_machine.prj`
 
-The manifest lists the sources of the machine: `k580wm80a.v`, `k580wt57.v`, `k580wg75.v`, `k580ww55.v`; `rk86_machine.v` is added with the extraction of the machine. Paths are relative to `src/`. The manifest is in no ISE project. The checker elaborates it with iverilog.
+The manifest lists the sources of the machine: `k580wm80a.v`, `k580wt57.v`, `k580wg75.v`, `k580ww55.v` and `rk86_machine.v`. Paths are relative to `src/`. The manifest is in no ISE project. The checker elaborates it with iverilog.
 
 ## 3. What stays in the board top
 
@@ -73,11 +73,11 @@ The extraction must keep these facts. They are read from the current code.
   - A line is `h_cnt` 0 to 515, that is 516 steps. 516 is a multiple of 6. The line end resets `d_cnt` to 0 (line 102) at the point where it wraps anyway. The period does not break at the line end.
   - `cce` is high for one cycle (when `state == 1`) once per `d_cnt` period.
 
-**CPU clock enable** (`src/radio86rk.v`)
+**CPU clock enable** (`src/rtl/rk86_machine.v`)
 
-- The CPU clock enable is 1 of 28 cycles: `cpu_cnt` counts 0 to 27 (lines 424-425).
-- When `hldareg[10:9]` is `01` (about 10 cycles after `hlda` rises) and the CPU has a read or write active, the CPU gets one extra enable at once (line 422). This re-enable is safe while the `cce` period is greater than 11. The period is 18.
-- `hrq` is looped back to `hlda` (line 452: `.hlda(hlda), .hrq(hlda)`).
+- The CPU clock enable is 1 of 28 cycles: `cpu_cnt` counts 0 to 27 (lines 103-104).
+- When `hldareg[10:9]` is `01` (about 10 cycles after `hlda` rises) and the CPU has a read or write active, the CPU gets one extra enable at once (line 101). This re-enable is safe while the `cce` period is greater than 11. The period is 18.
+- `hrq` is looped back to `hlda` (line 130: `.hlda(hlda), .hrq(hlda)`).
 
 **Memory**
 
@@ -117,7 +117,7 @@ The extraction must keep these facts. They are read from the current code.
 
 ## 8. The check
 
-`docs/contract-signals.csv` has one row per signal of the tops. A signal with different parts has one row per part (for example `ppa1_c` bits 0 and 7:1).
+`docs/contract-signals.csv` has one row per signal of the tops. A signal with different parts has one row per part (for example `ppa1_c` bits 0 and 7:1, before the machine moved out of the tops).
 
 | Column | Meaning |
 |---|---|
