@@ -58,8 +58,8 @@ initial begin
 	#(RUN_NS);
 	sim_ctl.xcheck = 1'b1;
 	#1;
-	$display("TB_SYS t=%0t edges_a=%0d edges_b=%0d lit=%0d sram_wr=%0d ma=%h mwr=%b mrd=%b xcount=%0d",
-		$time, nhs, nvs, nlit, nwr, ma, mwr_n, mrd_n, sim_ctl.xcount);
+	$display("TB_SYS t=%0t edges_a=%0d edges_b=%0d lit=%0d sram_wr=%0d ma=%h mwr=%b mrd=%b xtotal=%0d (verilog %0d, vhdl %0d)",
+		$time, nhs, nvs, nlit, nwr, ma, mwr_n, mrd_n, sim_ctl.xtotal, sim_ctl.xcount, sim_ctl.vxcount);
 	$finish;
 end
 endmodule

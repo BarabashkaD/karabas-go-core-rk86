@@ -180,8 +180,16 @@ def _verilog_decls(u, body, base):
                          base + off + item.find(s))
                 if im.group(2).strip():
                     d.kind = 'mem'
+                    d.dims = re.findall(r'\[\s*(\d+)\s*:\s*(\d+)\s*\]', im.group(2))
                 u.regs[d.name] = d
             off += len(item) + 1
+    # port directions (ANSI lists and body declarations)
+    u.vports = {}
+    for m in re.finditer(r'\b(input|output|inout)\b\s*(?:wire\b|reg\b)?\s*(?:signed\b)?\s*(?:\[[^\]]+\])?\s*'
+                         r'((?:\\\S+|\w+)(?:\s*,\s*(?!input\b|output\b|inout\b)(?:\w+))*)', body):
+        for nm in [x.strip() for x in m.group(2).split(',')]:
+            if nm and nm not in V_KEYWORDS:
+                u.vports[nm] = m.group(1)
     for m in re.finditer(r'\bwire\b\s*(?:signed\s*)?(\[[^\]]+\])?\s*([^;]*);', body):
         rng = m.group(1)[1:-1] if m.group(1) else None
         for item in m.group(2).split(','):
@@ -207,8 +215,87 @@ def verilog_insts(u, text, known):
     return out
 
 
+def verilog_inst_conns(text, unit, module, inst):
+    """Port connections of the instance <inst> of <module> in a Verilog unit: {port: actual text}
+    (named connections; '' for an empty connection). None if the instance is not found."""
+    b = blank_comments_v(text)
+    for m in re.finditer(r'\b%s\b\s*(#\s*\()?' % re.escape(module), b[unit.start:unit.end]):
+        i = unit.start + m.end()
+        if m.group(1):
+            i = match_paren(b, i - 1) + 1
+        im = re.compile(r'\s*\\?%s\s*\(' % re.escape(inst)).match(b, i)
+        if not im:
+            continue
+        o = im.end() - 1
+        c = match_paren(b, o)
+        res = {}
+        for item in split_top(b[o + 1:c], ','):
+            pm = re.match(r'^\s*\.(\w+)\s*\((.*)\)\s*$', item, re.S)
+            if pm:
+                res[pm.group(1)] = ' '.join(pm.group(2).split())
+        return res
+    return None
+
+
+def vhdl_inst_conns(text, unit, inst):
+    """Port map of the instance labelled <inst> in a VHDL unit: {formal (lower case): actual}."""
+    b = blank_comments_vhdl(text)
+    for an, s, e in unit.archs:
+        m = re.compile(r'(?i)\b%s\s*:' % re.escape(inst)).search(b, s, e)
+        if not m:
+            continue
+        pm = re.compile(r'(?i)\bport\s+map\s*\(').search(b, m.end(), e)
+        if not pm:
+            return None
+        o = pm.end() - 1
+        c = match_paren(b, o)
+        res = {}
+        for item in split_top(b[o + 1:c], ','):
+            am = re.match(r'^\s*(\w+)\s*=>\s*(.*?)\s*$', item, re.S)
+            if am:
+                res[am.group(1).lower()] = ' '.join(am.group(2).split())
+        return res
+    return None
+
+
+def vhdl_processes(text, unit):
+    """Processes of the architectures: [(label or '', [sensitivity names, lower case] or None, body)]."""
+    b = blank_comments_vhdl(text)
+    res = []
+    for an, s, e in unit.archs:
+        for m in re.finditer(r'(?i)(?:\b(\w+)\s*:\s*)?\bprocess\b\s*(\(([^)]*)\))?', b[s:e]):
+            st = s + m.end()
+            em = re.compile(r'(?i)\bend\s+process\b').search(b, st, e)
+            body = b[st:em.start() if em else e]
+            sens = None
+            if m.group(2):
+                sens = [x.strip().lower() for x in m.group(3).split(',') if x.strip()]
+            res.append((m.group(1) or '', sens, body))
+    return res
+
+
+def vhdl_array_elem(text, unit, typ):
+    """Element type of the array type <typ> declared in the architectures, or None."""
+    b = blank_comments_vhdl(text)
+    for an, s, e in unit.archs:
+        m = re.compile(r'(?is)\btype\s+%s\s+is\s+array\s*\(.*?\)\s*of\s+(\w+)' % re.escape(typ)).search(b, s, e)
+        if m:
+            return m.group(1)
+    return None
+
+
+def verilog_initial_writes(text, unit, name):
+    """Every assignment to <name> (whole, bit or part select) inside the initial blocks of the
+    unit: [(value text, pos, select text or '')]."""
+    return _initial_assigns(text, unit, name, True)
+
+
 def verilog_initial_assigns(text, unit, name):
     """Values assigned to the whole of <name> in initial blocks of the unit: [(value text, pos)]."""
+    return [(v, p) for v, p, sel in _initial_assigns(text, unit, name, True) if not sel]
+
+
+def _initial_assigns(text, unit, name, _all):
     b = blank_comments_v(text)
     res = []
     for m in re.finditer(r'\binitial\b', b[unit.start:unit.end]):
@@ -225,9 +312,13 @@ def verilog_initial_assigns(text, unit, name):
         else:
             k = b.find(';', s)
             stmt = b[s:k + 1]
-        for a in re.finditer(r'(?:\bforce\s+)?\b%s\b\s*(\[[^\]]*\])?\s*<?=(?!=)\s*([^;]+);' % re.escape(name), stmt):
-            if not a.group(1):
-                res.append((a.group(2).strip(), s + a.start()))
+        for a in re.finditer(r'(?:\bforce\s+)?(?<![\w.])%s\b\s*((?:\[[^\]]*\]\s*)*)<?=(?!=)\s*([^;]+);'
+                             % re.escape(name), stmt):
+            res.append((a.group(2).strip(), s + a.start(), a.group(1).strip()))
+        # concatenation targets: {a, b} = ...
+        for a in re.finditer(r'\{([^{}]*)\}\s*<?=(?!=)\s*([^;]+);', stmt):
+            if re.search(r'(?<![\w.])%s\b' % re.escape(name), a.group(1)):
+                res.append((a.group(2).strip(), s + a.start(), '{%s}' % a.group(1).strip()))
     return res
 
 

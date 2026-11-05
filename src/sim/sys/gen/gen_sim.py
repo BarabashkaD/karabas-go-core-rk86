@@ -3,7 +3,7 @@
 Usage:
   python -B gen_sim.py <rev_dir> <tb_dir> <board> <out_dir> --ipcore-dir <dir> --ipcore-ref <dir>
          [--ipcore-sha <sha>] [--rev-sha <sha>] [--tb-sha <sha>] [--tb <file> ...] [--tb-top tb_sys]
-         [--power-up <tsv>] [--power-up-map <tsv>] [--xcheck-regs <tsv>]
+         [--power-up <tsv>] [--power-up-map <tsv>] [--xcheck-regs <tsv>] [--xcheck-map <tsv>]
 
   <rev_dir>     export of the compared revision (src/, modules/)
   <tb_dir>      export of the TB revision (src/sim/, pk/): TB, models, tables
@@ -14,7 +14,11 @@ Usage:
   --ipcore-dir  the generated Coregen cores (build/clone-pr03/src/ipcore_dir, built from 3fdb64f)
   --ipcore-ref  export of the revision the cores were generated from (src/ipcore, the .coe files):
                 the compared revision's src/ipcore/**/*.xco and their .coe files must be equal to it,
-                the .mif of the cores equal to coe2hex(.coe), otherwise the generator stops.
+                the .mif of the cores equal to coe2hex(.coe), otherwise the generator stops. Its file
+                EXPORT_SHA (the exported commit) must match --ipcore-sha.
+  --power-up-map / --xcheck-map  per-comparison overrides of the candidate modules: a row id
+                (signal@first-candidate, or the bare signal for power-up rows) <TAB> modules.
+  The out_dir is cleaned (everything except <rev_dir>) before it is written.
 
 Every change of an RTL file is a declared substitution with an exact count check (subst.py);
 anything unexpected stops the generator with an error (exit 2).
@@ -33,11 +37,21 @@ import subst  # noqa: E402
 from subst import SubstError  # noqa: E402
 import mkhex  # noqa: E402
 
+# Per-board expectations, counted on the instances of the elaborated hierarchy (F9): the HDMI
+# I_FREQ literal (#7, text count in the top), hdmi_out_xilinx instances (#8), PLL_BASE / DCM_SP
+# primitive instances (#10).
 BOARDS = {
-    'go': {'top': 'radio86rk', 'i_freq': 0},
-    'mini': {'top': 'radio86rk_mini', 'i_freq': 1},
-    'minig': {'top': 'radio86rk_minig', 'i_freq': 1},
+    'go': {'top': 'radio86rk', 'i_freq': 0, 'hdmi_out_xilinx': 0, 'PLL_BASE': 1, 'DCM_SP': 0},
+    'mini': {'top': 'radio86rk_mini', 'i_freq': 1, 'hdmi_out_xilinx': 1, 'PLL_BASE': 1, 'DCM_SP': 1},
+    'minig': {'top': 'radio86rk_minig', 'i_freq': 1, 'hdmi_out_xilinx': 1, 'PLL_BASE': 1, 'DCM_SP': 1},
 }
+# Coregen memories: collision check off in the sim copies (F7c)
+COREGEN_MEMS = ('rambuffer', 'font', 'osd_vram', 'rom_font')
+POWER_UP_SOURCE = ('power-up values and the X-check table come from build/ref/pr07-baseline (the netlists of '
+                   'a9685c7), not from the F15/F23 path build/ref/machine-baseline (deviation from the plan text)')
+MACROS_SYM3 = ("macros SYMBOLS[3]: read at symbol_index 3 (out of range of [0:2]) at the last macro step: X in "
+               "RTL; XST: symbol bits 0,2,4,6,7 are constant 0 (pr07-baseline/go radio86rk.syr 1769-1773), bits "
+               "1,3,5 are not determined by the .syr -> 0; sim copy SYMBOLS[3] = 8'h00")
 # top nets wired to mcu outputs but declared reg (#2)
 MCU_OUT_REGS = ('fileloader_reset', 'fileloader_wr', 'fileloader_addr', 'loader_ram_a', 'fileloader_data',
                 'loader_ram_do')
@@ -176,6 +190,58 @@ def unit_src(units, name):
     return u.src if u else None
 
 
+PRIMS = ('PLL_BASE', 'DCM_SP')
+
+
+def fill_insts(units):
+    """Verilog instances of known units and of the clock primitives."""
+    known = set(u.name for u in units.values()) | set(PRIMS)
+    for u in units.values():
+        if u.lang == 'verilog':
+            u.insts = hdl.verilog_insts(u, u.src.text, known)
+
+
+def inst_counts(srcs, units, top):
+    """Number of instances of every unit / primitive in the hierarchy under <top> (lower-case keys)."""
+    fill_insts(units)
+    counts = {}
+
+    def walk(u, mult, depth):
+        if depth > 50:
+            die('instance hierarchy too deep at %s' % u.name)
+        counts[u.name.lower()] = counts.get(u.name.lower(), 0) + mult
+        for inst, mod in u.insts:
+            if mod in PRIMS:
+                counts[mod] = counts.get(mod, 0) + mult
+                continue
+            v = units.get(mod.lower())
+            if v is not None:
+                walk(v, mult, depth + 1)
+    walk(units[top.lower()], 1, 0)
+    return counts
+
+
+def instances_of(units, name):
+    """[(parent unit, instance label)] of the unit <name> (case-insensitive) in all units."""
+    res = []
+    for u in units.values():
+        for inst, mod in u.insts:
+            if mod.lower() == name.lower():
+                res.append((u, inst))
+    return res
+
+
+def port_dir(unit, port):
+    if unit.lang == 'verilog':
+        return {'input': 'in', 'output': 'out', 'inout': 'inout'}.get(unit.vports.get(port))
+    d = unit.ports.get(port.lower())
+    return d.mode if d else None
+
+
+def refs(expr, name):
+    return re.search(r'(?<![\w.$])%s\b' % re.escape(name), expr or '') is not None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('rev_dir')
@@ -192,6 +258,7 @@ def main():
     ap.add_argument('--power-up', help='default <tb_dir>/src/sim/sys/power_up.tsv')
     ap.add_argument('--power-up-map', help='per-comparison override: signal <TAB> candidate modules')
     ap.add_argument('--xcheck-regs', help='default <tb_dir>/src/sim/sys/xcheck_regs.tsv')
+    ap.add_argument('--xcheck-map', help='per-comparison override: id <TAB> candidate modules')
     a = ap.parse_args()
 
     rev, tbd, out = [os.path.abspath(x) for x in (a.rev_dir, a.tb_dir, a.out_dir)]
@@ -223,11 +290,19 @@ def main():
         if not os.path.isfile(path):
             die('%s: missing %s' % (prj, path))
         srcs.append(Src(m.group(1), key, path))
+    shafile = os.path.join(os.path.abspath(a.ipcore_ref), 'EXPORT_SHA')
+    if not os.path.isfile(shafile):
+        die('%s missing: the ipcore reference export must record its commit' % shafile)
+    ref_sha = read(shafile).strip()
+    if not (len(a.ipcore_sha) >= 7 and ref_sha.startswith(a.ipcore_sha)):
+        die('ipcore reference is an export of %s, not of --ipcore-sha %s' % (ref_sha, a.ipcore_sha))
+    checks.append('ipcore reference export: %s (EXPORT_SHA) = --ipcore-sha %s' % (ref_sha, a.ipcore_sha))
     mif_files = check_ipcore(rev, os.path.abspath(a.ipcore_ref), os.path.abspath(a.ipcore_dir), prj_ip, checks)
 
     units = parse_units(srcs)
     if top.lower() not in units:
         die('top %s not found in %s' % (top, prj))
+    counts = inst_counts(srcs, units, top)
 
     def need(name):
         s = unit_src(units, name)
@@ -250,6 +325,13 @@ def main():
     s.text = j.sub(1, s.key, s.text,
                    r'localparam\s*(\[[^\]]+\])\s*(\w+)\s*\[\s*(\d+)\s*:\s*(\d+)\s*\]\s*=\s*\{([^}]*)\}\s*;',
                    lp_array, 1, 'localparam array -> reg array + initial (ISim: no localparam arrays)')
+    # #13 SYMBOLS[3]: the synthesized value of the out-of-range read (F7a)
+    mu = units['macros']
+    si = mu.regs.get('symbol_index')
+    if si is None or si.width() != 2 or not re.search(r'\bSYMBOLS\s*\[\s*symbol_index\s*\]', s.text):
+        die('#13 %s: expected SYMBOLS[symbol_index] with a 2-bit symbol_index' % s.key)
+    s.text = j.sub(13, s.key, s.text, r'reg (\[7:0\]) SYMBOLS \[0:2\]; initial begin ',
+                   r"reg \1 SYMBOLS [0:3]; initial begin SYMBOLS[3] = 8'h00; ", 1, MACROS_SYM3)
 
     # ---- #2 top: reg -> wire on nets driven by mcu outputs
     s = need(top)
@@ -275,6 +357,20 @@ def main():
     core = j.sub(4, s.key, core, r'(?i)process\s*\(\s*kb_data\s*,\s*A\s*\)', 'process( kb_data, A, KB_STATUS)',
                  {0, 1}, 'process( kb_data, A) -> process( kb_data, A, KB_STATUS) (HDLCompiler:92; XST reads '
                  'KB_STATUS)')
+    # every combinational process of the core that reads KB_STATUS must have it in its sensitivity list
+    cu = [x for x in hdl.vhdl_units(core, s.key) if x.name.lower() == 'hid_parser_core'][0]
+    sens_ok = []
+    for label, sens, body in hdl.vhdl_processes(core, cu):
+        if not re.search(r'(?i)\bKB_STATUS\b', body):
+            continue
+        if re.search(r"(?i)\b(rising_edge|falling_edge)\b|'event\b", body) or sens is None:
+            continue
+        if 'kb_status' not in sens:
+            die('#4 %s: process (%s) reads KB_STATUS but its sensitivity list is (%s)'
+                % (s.key, label or 'unlabelled', ', '.join(sens)))
+        sens_ok.append('(%s)' % ', '.join(sens))
+    checks.append('#4 hid_parser_core: combinational processes reading KB_STATUS have it in the sensitivity list: %s'
+                  % ('; '.join(sens_ok) or 'none read it'))
     s.text = core
     s.extra.append((os.path.splitext(s.key)[0] + '_wrap.vhd', wrap))
 
@@ -294,9 +390,14 @@ def main():
     s.text = j.sub(7, s.key, s.text, r'\.I_FREQ\s*\(\s*40\s*\)', ".I_FREQ(8'd40)", board['i_freq'],
                    ".I_FREQ(40) -> .I_FREQ(8'd40) (32-bit literal on an 8-bit VHDL port; XST truncates)")
 
-    # ---- #8 hdmi_out_xilinx mod5 power-up
-    s = unit_src(units, 'hdmi_out_xilinx')
-    if s is not None:
+    # ---- #8 hdmi_out_xilinx mod5 power-up (expected per board, counted on instances)
+    n8 = counts.get('hdmi_out_xilinx', 0)
+    if n8 != board['hdmi_out_xilinx']:
+        die('#8: %d instances of hdmi_out_xilinx under %s, expected %d for %s'
+            % (n8, top, board['hdmi_out_xilinx'], a.board))
+    checks.append('#8 instances of hdmi_out_xilinx: %d (expected %d)' % (n8, board['hdmi_out_xilinx']))
+    if n8:
+        s = need('hdmi_out_xilinx')
         s.text = j.sub(8, s.key, s.text,
                        r'(?i)(signal\s+mod5\s*:\s*std_logic_vector\s*\(\s*2\s+downto\s+0\s*\))\s*;',
                        r'\1 := "000"; -- sim copy: FD INIT 0', 1,
@@ -304,19 +405,24 @@ def main():
     else:
         j.note(8, '-', 'hdmi_out_xilinx not in the design', found=0, expected=0)
 
-    # ---- #9 rambuffer collision check
-    s = need('rambuffer')
-    s.text = j.sub(9, s.key, s.text, r'\.C_SIM_COLLISION_CHECK\("ALL"\)', '.C_SIM_COLLISION_CHECK("NONE")', 1,
-                   'C_SIM_COLLISION_CHECK("ALL") -> ("NONE") (port collisions every frame flood the log)')
+    # ---- #9 collision check off in all Coregen memories
+    for mem in COREGEN_MEMS:
+        s = need(mem)
+        s.text = j.sub(9, s.key, s.text, r'\.C_SIM_COLLISION_CHECK\("ALL"\)', '.C_SIM_COLLISION_CHECK("NONE")', 1,
+                       'C_SIM_COLLISION_CHECK("ALL") -> ("NONE"): the behavioural model gives X on a port collision, '
+                       'the hardware deterministic data by the write mode')
 
-    # ---- #10 ideal clock models (work shadows unisims_ver)
+    # ---- #10 ideal clock models (work shadows unisims_ver), expected per board
     models = []
-    alltext = '\n'.join(x.text for x in srcs)
     for prim, f in (('PLL_BASE', 'pll_base_ideal.v'), ('DCM_SP', 'dcm_sp_ideal.v')):
-        if re.search(r'\b%s\b' % prim, alltext):
+        n = counts.get(prim, 0)
+        if n != board[prim]:
+            die('#10: %d instances of %s under %s, expected %d for %s' % (n, prim, top, board[prim], a.board))
+        checks.append('#10 instances of %s: %d (expected %d)' % (prim, n, board[prim]))
+        if n:
             models.append(('sim/models/' + f, read(os.path.join(sysdir, 'models', f))))
-            j.note(10, 'sim/models/' + f, 'ideal %s model in work (shadows unisims_ver; declared divergence F11)'
-                   % prim, kind='model')
+            j.note(10, 'sim/models/' + f, 'ideal %s model in work (shadows unisims_ver; declared divergence F11), '
+                   '%d instance(s)' % (prim, n), found=n, expected=board[prim], kind='model')
 
     # ---- re-parse the substituted texts (core names map back to the logical modules)
     allsrc = srcs + []
@@ -327,24 +433,56 @@ def main():
             e.lang, e.key, e.path, e.text, e.orig, e.extra = 'vhdl', key, None, text, None, []
             extra_srcs.append(e)
     units = parse_units(srcs + extra_srcs)
+    fill_insts(units)
     logical = {}
     for k, u in units.items():
         logical[k] = u
+    core_of = {}       # renamed core -> the logical name its wrapper carries
     for name in ('mcu', 'hid_parser'):
         logical[name] = units[name + '_core']
+        core_of[name + '_core'] = name
     edits = {}         # src key -> [(start, end, text)]
     vblocks = {}       # unit name -> [text] inserted before endmodule / end architecture
 
     def add_block(u, text):
         vblocks.setdefault(u.name.lower(), (u, []))[1].append(text)
 
-    # ---- #12 cpu_int: sourceless wire -> force 0 (as XST: Xst:653 -> GND)
+    # ---- #12 cpu_int: sourceless wire -> force 0 (as XST: Xst:653 -> GND); stop if it has a driver
     hits = [u for u in units.values() if u.lang == 'verilog' and 'cpu_int' in u.wires]
     if len(hits) != 1:
         die('#12: wire cpu_int declared in %d modules (%s), expected 1' % (len(hits), [u.name for u in hits]))
-    add_block(hits[0], "initial force cpu_int = 1'b0; // sim copy: sourceless net, Xst:653 -> GND")
-    j.note(12, hits[0].src.key, "module %s: initial force cpu_int = 1'b0 (sourceless, Xst:653 -> GND)"
-           % hits[0].name)
+    cu = hits[0]
+    cb = hdl.blank_comments_v(cu.src.text)[cu.start:cu.end]
+    drivers = []
+    if re.search(r'\bassign\b[^;]*?(?<![\w.$])cpu_int\b[^;=]*=', cb):
+        drivers.append('continuous assignment')
+    if re.search(r'\bwire\b[^;]*(?<![\w.$])cpu_int\s*=', cb):
+        drivers.append('declaration assignment')
+    conn_notes = []
+    for inst, mod in cu.insts:
+        conns = None
+        if mod in PRIMS:
+            conns = hdl.verilog_inst_conns(cu.src.text, cu, mod, inst)
+            child = None
+        else:
+            child = units.get(mod.lower())
+            conns = hdl.verilog_inst_conns(cu.src.text, cu, mod, inst)
+        for port, actual in (conns or {}).items():
+            if not refs(actual, 'cpu_int'):
+                continue
+            d = port_dir(child, port) if child is not None else None
+            conn_notes.append('%s.%s (%s)' % (inst, port, d or 'unknown direction'))
+            if d != 'in':
+                drivers.append('instance %s port %s (%s)' % (inst, port, d or 'unknown direction'))
+    if drivers:
+        die('#12 %s: cpu_int has a driver in module %s: %s' % (cu.src.key, cu.name, '; '.join(drivers)))
+    add_block(cu, "initial force cpu_int = 1'b0; // sim copy: sourceless net, Xst:653 -> GND")
+    j.note(12, cu.src.key, "module %s: initial force cpu_int = 1'b0 (sourceless, Xst:653 -> GND)" % cu.name)
+    checks.append('#12 cpu_int in %s: no continuous or declaration assignment, no instance output; loads: %s'
+                  % (cu.name, ', '.join(conn_notes) or 'none'))
+
+    def row_key(name, cands):
+        return '%s@%s' % (name, cands[0]) if cands else name
 
     # ---- #11 power-up values (A3, A4)
     pu_path = a.power_up or os.path.join(sysdir, 'power_up.tsv')
@@ -358,7 +496,9 @@ def main():
     v_init = {}        # unit -> [(sig, value)]
     for r in pu_rows:
         sig, value = r['signal'], r['value']
-        cands = [x.strip() for x in override.get(sig, r['modules']).split(',') if x.strip()]
+        base = [x.strip() for x in r['modules'].split(',') if x.strip()]
+        ov = override.get(row_key(sig, base), override.get(sig))
+        cands = [x.strip() for x in (ov or r['modules']).split(',') if x.strip()]
         hits = []
         for c in cands:
             u = logical.get(c.lower())
@@ -371,21 +511,24 @@ def main():
             die('power-up row %s (%s): %d matches in %s, expected exactly 1'
                 % (sig, ','.join(cands), len(hits), [h[0] for h in hits]))
         c, u, d = hits[0]
-        rtl = None
+        rtl, partial = None, False
         if u.lang == 'verilog':
             if d.init is not None:
                 rtl = d.init
             else:
-                ia = hdl.verilog_initial_assigns(u.src.text, u, sig)
-                if ia:
-                    rtl = ia[0][0]
+                ws = hdl.verilog_initial_writes(u.src.text, u, d.name)
+                whole = [w for w in ws if not w[2]]
+                if whole:
+                    rtl = whole[0][0]
+                elif ws:
+                    rtl, partial = '; '.join('%s%s = %s' % (d.name, w[2], w[0]) for w in ws), True
         elif d.init is not None:
             rtl = ' '.join(d.init.split())
         where = '%s.%s (%s)' % (c, d.name, u.src.key)
         if rtl is not None:
-            same = hdl.same_value(rtl, value, d.width())
             status = 'RTL INITIALIZER (%s.%s) = %s' % (c, d.name, rtl)
             verdicts.append(status)
+            same = None if partial else hdl.same_value(rtl, value, d.width())
             if same is False:
                 verdicts.append('POWER-UP DIFFERS (%s.%s: RTL %s, table %s)' % (c, d.name, rtl, value))
             elif same is None:
@@ -413,58 +556,152 @@ def main():
                % (u.name, len(lst), ', '.join(x[0].name for x in lst)), found=len(lst), expected=len(lst),
                kind='powerup')
 
-    # ---- X-checkers (A5)
+    # ---- X-checkers (A5): one row per logical register, applied exactly once per revision
     xc_path = a.xcheck_regs or os.path.join(sysdir, 'xcheck_regs.tsv')
     xrows = read_tsv(xc_path)
-    xmods = {}
+    xover = {}
+    if a.xcheck_map:
+        for r in read_tsv(a.xcheck_map):
+            xover[r['id']] = r['modules']
+    vlines, hlines = {}, {}      # unit -> Verilog / VHDL checker lines
+    xc_land, xc_exempt, xc_other = [], [], 0
+    numeric_rx = r'(?im)^\s*use\s+ieee\.numeric_std\.all\s*;'
+
+    def vhdl_check(u, expr, label, decl_typ):
+        """VHDL checker line(s) for a readable object of type decl_typ, or None (never X), or die."""
+        typ = ' '.join((decl_typ or '').split())
+        inc = 'work.sim_xcheck_pkg.xcount := work.sim_xcheck_pkg.xcount + 1;'
+        rep = 'report "XCHECK %s (" & %s\'path_name & ")" severity note;' % (label, expr.split('(')[0])
+        if re.match(r'^std_u?logic(_vector\s*\(.*\))?$', typ, re.I):
+            return ['\tif is_x(%s) then %s %s end if;' % (expr, rep, inc)]
+        if re.match(r'^(un)?signed\s*\(.*\)$', typ, re.I) and re.search(numeric_rx, u.src.text):
+            return ['\tif is_x(std_logic_vector(%s)) then %s %s end if;' % (expr, rep, inc)]
+        if re.match(r'^(integer|natural|positive|boolean)\b', typ, re.I):
+            return None
+        if re.search(r'(?is)\btype\s+%s\s+is\s*\(' % re.escape(typ), hdl.blank_comments_vhdl(u.src.text)):
+            return None      # enumeration type: no X value, starts at its leftmost literal
+        elem = hdl.vhdl_array_elem(u.src.text, u, typ)
+        if elem and re.match(r'^std_u?logic(_vector)?$', elem, re.I):
+            return ['\tfor i in %s\'range loop if is_x(%s(i)) then %s %s exit; end if; end loop;'
+                    % (expr, expr, rep, inc)]
+        die('X-check %s: type %r of %s is not supported' % (label, decl_typ, expr))
+
+    def verilog_check(expr, label):
+        return ('\tif (^(%s) === 1\'bx) begin $display("XCHECK %%m.%s = %%b", %s); '
+                'sim_ctl.xcount = sim_ctl.xcount + 1; end' % (expr, label, expr))
+
     for r in xrows:
-        xmods.setdefault(r['module'], [])
-        if r['register'] not in xmods[r['module']]:
-            xmods[r['module']].append(r['register'])
-    xc_report, xc_total = [], 0
-    for mod in sorted(xmods, key=str.lower):
-        u = logical.get(mod.lower())
-        if u is None:
-            xc_report.append('%s: not in the design (%d registers)' % (mod, len(xmods[mod])))
+        boards = [x.strip() for x in r['boards'].split(',') if x.strip()]
+        if a.board not in boards:
+            xc_other += 1
             continue
-        lines, skipped = [], []
-        for reg in xmods[mod]:
-            if u.lang == 'verilog':
-                d = u.regs.get(reg)
-                if d is None or d.kind == 'mem':
-                    skipped.append('%s (%s)' % (reg, 'not declared' if d is None else 'memory'))
-                    continue
-                lines.append('\tif (^%s === 1\'bx) begin $display("XCHECK %%m.%s = %%b", %s); '
-                             'sim_ctl.xcount = sim_ctl.xcount + 1; end' % (d.name, d.name, d.name))
+        reg = r['register']
+        cands = [x.strip() for x in xover.get(r['id'], r['modules']).split(',') if x.strip()]
+        hits = []
+        for c in cands:
+            u = logical.get(c.lower())
+            if u is None:
+                continue
+            d = u.regs.get(reg) if u.lang == 'verilog' else (u.regs.get(reg.lower()) or u.ports.get(reg.lower()))
+            if d is not None and (u.lang == 'verilog' or d.kind == 'signal' or d.mode in ('out', 'buffer', 'inout')):
+                hits.append((c, u, d))
+        if len(hits) != 1:
+            die('X-check row %s (candidates %s): declared in %d of them %s, expected exactly 1'
+                % (r['id'], ','.join(cands), len(hits), [h[0] for h in hits]))
+        c, u, d = hits[0]
+        where = '%s.%s (%s)' % (c, d.name, u.src.key)
+        if u.lang == 'verilog':
+            if d.kind == 'mem':
+                if not d.dims:
+                    die('X-check %s: memory without numeric bounds' % where)
+                lo, hi = sorted(int(x) for x in d.dims[0])
+                vlines.setdefault(u.name.lower(), (u, []))[1].append(
+                    '\tfor (sim_xc_i = %d; sim_xc_i <= %d; sim_xc_i = sim_xc_i + 1) if (^%s[sim_xc_i] === 1\'bx) '
+                    'begin $display("XCHECK %%m.%s[%%0d] = %%b", sim_xc_i, %s[sim_xc_i]); '
+                    'sim_ctl.xcount = sim_ctl.xcount + 1; end' % (lo, hi, d.name, d.name, d.name))
+                xc_land.append('%s -> %s, memory [%d:%d]' % (r['id'], where, lo, hi))
             else:
-                d = u.regs.get(reg.lower()) or u.ports.get(reg.lower())
-                if d is None:
-                    skipped.append('%s (not declared)' % reg)
-                    continue
-                if d.kind == 'port' and d.mode not in ('buffer', 'inout'):
-                    skipped.append('%s (out port, not readable)' % reg)
-                    continue
-                typ = ' '.join((d.typ or '').split())
-                numeric = re.search(r'(?im)^\s*use\s+ieee\.numeric_std\.all\s*;', u.src.text)
-                if not (re.match(r'^std_u?logic(_vector\s*\(.*\))?$', typ, re.I) or
-                        (numeric and re.match(r'^(un)?signed\s*\(.*\)$', typ, re.I))):
-                    skipped.append('%s (type %s)' % (reg, d.typ))
-                    continue
-                arg = d.name if typ.lower().startswith('std_') else 'std_logic_vector(%s)' % d.name
-                lines.append('\tif is_x(%s) then report "XCHECK " & %s\'path_name severity note; end if;'
-                             % (arg, d.name))
-        if lines:
-            if u.lang == 'verilog':
-                add_block(u, 'always @(posedge sim_ctl.xcheck) begin // sim copy: X-check (src/sim/sys/'
-                             'xcheck_regs.tsv)\n%s\nend' % '\n'.join(lines))
+                vlines.setdefault(u.name.lower(), (u, []))[1].append(verilog_check(d.name, d.name))
+                xc_land.append('%s -> %s' % (r['id'], where))
+            continue
+        if d.kind == 'signal' or d.mode in ('buffer', 'inout'):
+            ls = vhdl_check(u, d.name, '%s.%s' % (c, d.name), d.typ)
+            if ls is None:
+                xc_exempt.append('%s -> %s: type %s, never X' % (r['id'], where, d.typ))
             else:
-                add_block(u, 'sim_xcheck_p : process -- sim copy: X-check (src/sim/sys/xcheck_regs.tsv)\nbegin\n'
-                             '\twait until work.sim_xcheck_pkg.xcheck = \'1\';\n%s\nend process;' % '\n'.join(lines))
-            xc_total += len(lines)
-            j.note('X', u.src.key, '%s %s: X-checker, %d registers' % ('module' if u.lang == 'verilog' else 'entity',
-                                                                      u.name, len(lines)),
-                   found=len(lines), expected=len(lines), kind='xcheck')
-        xc_report.append('%s: %d checked%s' % (mod, len(lines), ('; skipped: ' + ', '.join(skipped)) if skipped else ''))
+                hlines.setdefault(u.name.lower(), (u, []))[1].extend(ls)
+                xc_land.append('%s -> %s' % (r['id'], where))
+            continue
+        # VHDL out port: not readable inside (VHDL-93); check the net in every instantiating parent
+        # (up the hierarchy while the actual is again an out port of a VHDL parent)
+        def check_out(cname, port, path, depth):
+            if depth > 10:
+                die('X-check %s: out-port chain too long' % where)
+            parents = instances_of(units, cname)
+            if not parents:
+                die('X-check %s: out port %s.%s, but no instance of %s found' % (where, cname, port, cname))
+            for pu, inst in parents:
+                label = '%s.%s.%s' % (path, inst, port) if path else '%s.%s' % (inst, port)
+                if pu.lang == 'verilog':
+                    conns = hdl.verilog_inst_conns(pu.src.text, pu, cname, inst) or {}
+                    actual = [v for k, v in conns.items() if k.lower() == port.lower()]
+                    if not actual or not actual[0]:
+                        die('X-check %s: out port %s unconnected in %s instance %s' % (where, port, pu.name, inst))
+                    vlines.setdefault(pu.name.lower(), (pu, []))[1].append(verilog_check(actual[0], label))
+                    xc_land.append('%s -> %s, out port: checked on the net %s of %s (instance %s)'
+                                   % (r['id'], where, actual[0], pu.name, inst))
+                    continue
+                conns = hdl.vhdl_inst_conns(pu.src.text, pu, inst) or {}
+                actual = conns.get(port.lower())
+                if not actual or actual.lower() == 'open':
+                    die('X-check %s: out port %s unconnected in %s instance %s' % (where, port, pu.name, inst))
+                base = re.match(r'^(\w+)', actual).group(1)
+                pd = pu.regs.get(base.lower()) or pu.ports.get(base.lower())
+                if pd is not None and pd.kind == 'port' and pd.mode == 'out' and actual == base:
+                    check_out(pu.name if pu.name.lower() not in core_of else core_of[pu.name.lower()],
+                              pd.name, label, depth + 1)
+                    continue
+                if pd is None or (pd.kind == 'port' and pd.mode not in ('buffer', 'inout')):
+                    die('X-check %s: the actual %s in %s is not a readable signal' % (where, actual, pu.name))
+                typ = pd.typ if actual == base else ('std_logic_vector(0 downto 0)'
+                                                     if re.search(r'downto|\bto\b', actual) else 'std_logic')
+                ls = vhdl_check(pu, actual, label, typ)
+                hlines.setdefault(pu.name.lower(), (pu, []))[1].extend(ls or [])
+                xc_land.append('%s -> %s, out port: checked on the signal %s of %s (instance %s)'
+                               % (r['id'], where, actual, pu.name, inst))
+        check_out(c, d.name, '', 0)
+    xc_total = 0
+    for k, (u, lines) in vlines.items():
+        add_block(u, 'integer sim_xc_i;\nalways @(posedge sim_ctl.xcheck) begin // sim copy: X-check '
+                     '(src/sim/sys/xcheck_regs.tsv)\n%s\nend' % '\n'.join(lines))
+        xc_total += len(lines)
+        j.note('X', u.src.key, 'module %s: X-checker, %d checks' % (u.name, len(lines)), found=len(lines),
+               expected=len(lines), kind='xcheck')
+    for k, (u, lines) in hlines.items():
+        add_block(u, 'sim_xcheck_p : process -- sim copy: X-check (src/sim/sys/xcheck_regs.tsv)\nbegin\n'
+                     '\twait until work.sim_xcheck_pkg.xcheck = \'1\';\n%s\nend process;' % '\n'.join(lines))
+        xc_total += len(lines)
+        j.note('X', u.src.key, 'entity %s: X-checker, %d checks' % (u.name, len(lines)), found=len(lines),
+               expected=len(lines), kind='xcheck')
+
+    # ---- declared: inputs of VHDL entities left unconnected by a Verilog parent (F7b)
+    undriven = []
+    for pu in units.values():
+        if pu.lang != 'verilog':
+            continue
+        for inst, mod in pu.insts:
+            cu2 = units.get(mod.lower())
+            if cu2 is None or cu2.lang != 'vhdl':
+                continue
+            conns = dict((k.lower(), v) for k, v in (hdl.verilog_inst_conns(pu.src.text, pu, mod, inst) or {}).items())
+            open_in = []
+            for p in cu2.port_items:
+                if p.mode == 'in' and not conns.get(p.name.lower()):
+                    open_in.append("%s (%s)" % (p.name, ('default ' + ' '.join(p.init.split())) if p.init else "'U'"))
+            if open_in:
+                undriven.append("%s.%s (entity %s): %d unconnected inputs: %s; XST ties them to GND (Xst:2898), "
+                                "the simulation keeps the VHDL default or 'U'"
+                                % (pu.name, inst, cu2.name, len(open_in), ', '.join(open_in)))
 
     # ---- apply the blocks and edits
     for k, (u, blocks) in vblocks.items():
@@ -484,11 +721,17 @@ def main():
             ed = [(s0, e0, t.replace('\r\n', '\n').replace('\n', '\r\n')) for s0, e0, t in ed]
         bykey[key].text = subst.apply_edits(bykey[key].text, ed)
 
-    # ---- write the tree
-    for d in ('sim', 'tb', 'roms'):
-        p = os.path.join(out, d)
-        if os.path.isdir(p):
-            shutil.rmtree(p)
+    # ---- write the tree: everything of an earlier generation or run goes (isim/, tb.exe, .mif, logs);
+    # only the export of the revision stays
+    if os.path.isdir(out):
+        for name in os.listdir(out):
+            p = os.path.join(out, name)
+            if os.path.abspath(p) == rev:
+                continue
+            if os.path.isdir(p) and not os.path.islink(p):
+                shutil.rmtree(p)
+            else:
+                os.remove(p)
     prj_lines = []
     support = [('vhdl', 'sim/support/sim_xcheck.vhd', read(os.path.join(sysdir, 'sim_xcheck.vhd')))]
     for lang, key, text in support:
@@ -557,6 +800,9 @@ def main():
         if e['kind'] in ('subst', 'model', 'powerup') and e['found']:
             sm.append('  #%s %s: %s' % (e['num'], e['file'], e['desc']))
     sm.append('  #F13 %s' % F13)
+    sm += ['  #U %s' % x for x in undriven]
+    sm.append('')
+    sm.append('SOURCE OF THE TABLES: %s' % POWER_UP_SOURCE)
     sm.append('')
     sm.append('POWER-UP (A3: where each row of %s landed)' % rel(pu_path, tbd).replace('\\', '/'))
     sm += ['  ' + x for x in placed]
@@ -564,8 +810,11 @@ def main():
     sm.append('VERDICTS')
     sm += ['  ' + x for x in verdicts] or ['  (none)']
     sm.append('')
-    sm.append('X-CHECKERS (A5: %d registers; trigger: posedge sim_ctl.xcheck)' % xc_total)
-    sm += ['  ' + x for x in xc_report]
+    sm.append('X-CHECKERS (A5: where each row of %s landed; %d checks, trigger posedge sim_ctl.xcheck, '
+              'count sim_ctl.xtotal)' % (rel(xc_path, tbd).replace('\\', '/'), xc_total))
+    sm += ['  ' + x for x in xc_land]
+    sm += ['  %s (exempt)' % x for x in xc_exempt]
+    sm.append('  rows of other boards: %d' % xc_other)
     sm.append('')
     sm.append('CHECKS')
     sm += ['  ' + x for x in checks]
