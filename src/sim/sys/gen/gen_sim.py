@@ -17,7 +17,9 @@ Usage:
                 the .mif of the cores equal to coe2hex(.coe), otherwise the generator stops. Its file
                 EXPORT_SHA (the exported commit) must match --ipcore-sha.
   --power-up-map / --xcheck-map  per-comparison overrides of the candidate modules: a row id
-                (signal@first-candidate, or the bare signal for power-up rows) <TAB> modules.
+                (signal@first-candidate, or the bare signal for power-up rows) <TAB> modules; for an X-check
+                row the modules '-' drop it for this comparison (listed in summary.txt). An X-check row whose
+                netlist boards include the board must hit exactly once; the RTL hierarchy only adds rows.
   The out_dir is cleaned (everything except <rev_dir>) before it is written.
 
 Every change of an RTL file is a declared substitution with an exact count check (subst.py);
@@ -273,6 +275,8 @@ def check_out_dir(out, rev, tbd, ipcore_dir, ipcore_ref):
     or nothing but the revision export; the inputs must not lie inside it."""
     if os.path.normcase(rev) == os.path.normcase(out):
         die('out_dir %s is the revision export itself' % out)
+    if os.path.basename(rev) in GENERATED_DIRS | GENERATED_FILES or os.path.basename(rev).lower().endswith('.mif'):
+        die('the revision export is named %s, a name gen_sim generates and cleans' % os.path.basename(rev))
     for what, p in (('tb_dir', tbd), ('--ipcore-dir', ipcore_dir), ('--ipcore-ref', ipcore_ref)):
         if inside(p, out):
             die('%s %s lies inside out_dir %s' % (what, p, out))
@@ -283,11 +287,13 @@ def check_out_dir(out, rev, tbd, ipcore_dir, ipcore_ref):
                 % (out, ', '.join(sorted(others)[:5]), MARKER))
 
 
-def clean_out_dir(out):
+def clean_out_dir(out, rev):
     if not os.path.isdir(out):
         return
     for name in os.listdir(out):
         p = os.path.join(out, name)
+        if os.path.normcase(os.path.abspath(p)) == os.path.normcase(rev):
+            continue      # never the revision export
         if name in GENERATED_DIRS and os.path.isdir(p) and not os.path.islink(p):
             shutil.rmtree(p)
         elif (name in GENERATED_FILES or name.lower().endswith('.mif')) and os.path.isfile(p):
@@ -515,6 +521,12 @@ def main():
     if re.search(r'\bwire\b[^;]*(?<![\w.$])cpu_int\s*=', cb):
         drivers.append('declaration assignment')
     conn_notes = []
+    gates = r'\b(buf|not|and|or|xor|nand|nor|xnor|bufif0|bufif1|notif0|notif1|pullup|pulldown|tran|rtran|tranif0|tranif1|rtranif0|rtranif1)\s*\('
+    for gm in re.finditer(gates, cb):
+        o = gm.end() - 1
+        args = cb[o + 1:hdl.match_paren(cb, o)]
+        if refs(args, 'cpu_int'):
+            drivers.append('unnamed gate primitive %s(%s)' % (gm.group(1), ' '.join(args.split())))
     for cell, inst, conns in hdl.verilog_all_insts(cu, cu.src.text):
         if not any(refs(v, 'cpu_int') for v in conns.values()):
             continue
@@ -624,7 +636,7 @@ def main():
         for r in read_tsv(a.xcheck_map):
             xover[r['id']] = r['modules']
     vlines, hlines = {}, {}      # unit -> Verilog / VHDL checker lines
-    xc_land, xc_exempt, xc_other = [], [], []
+    xc_land, xc_exempt, xc_other, xc_mapped_off = [], [], [], []
     numeric_rx = r'(?im)^\s*use\s+ieee\.numeric_std\.all\s*;'
 
     def vhdl_check(u, expr, label, decl_typ):
@@ -652,9 +664,15 @@ def main():
 
     for r in xrows:
         reg = r['register']
-        cands = [x.strip() for x in xover.get(r['id'], r['modules']).split(',') if x.strip()]
-        # board membership from the RTL hierarchy (N2): the row applies if a candidate is instantiated
-        if not any(counts.get(c.lower(), 0) for c in cands):
+        ov = xover.get(r['id'])
+        if ov is not None and ov.strip() == '-':
+            xc_mapped_off.append(r['id'])      # dropped for this comparison by --xcheck-map
+            continue
+        cands = [x.strip() for x in (ov or r['modules']).split(',') if x.strip()]
+        boards = [x.strip() for x in r['boards'].split(',') if x.strip()]
+        # A row of this board (netlist) must hit exactly once; the RTL hierarchy may only add rows
+        # (a candidate instantiated although the board's netlist lacks the register)
+        if a.board not in boards and not any(counts.get(c.lower(), 0) for c in cands):
             xc_other.append(r['id'])
             continue
         hits = []
@@ -789,7 +807,7 @@ def main():
         bykey[key].text = subst.apply_edits(bykey[key].text, ed)
 
     # ---- write the tree: the known outputs of an earlier generation or run go (N1), nothing else
-    clean_out_dir(out)
+    clean_out_dir(out, rev)
     write(os.path.join(out, MARKER), 'work tree of src/sim/sys/gen/gen_sim.py: generated names %s\n'
           % ' '.join(sorted(GENERATED_DIRS | GENERATED_FILES) + ['*.mif']))
     prj_lines = []
@@ -874,8 +892,10 @@ def main():
               'count sim_ctl.xtotal)' % (rel(xc_path, tbd).replace('\\', '/'), xc_total))
     sm += ['  ' + x for x in xc_land]
     sm += ['  %s (exempt)' % x for x in xc_exempt]
-    sm.append('  rows of other boards (no candidate module in the hierarchy of %s): %d%s'
-              % (top, len(xc_other), (': ' + ', '.join(xc_other)) if xc_other else ''))
+    sm.append('  rows of other boards (board %s not in their netlist boards, no candidate module in the hierarchy '
+              'of %s): %d%s' % (a.board, top, len(xc_other), (': ' + ', '.join(xc_other)) if xc_other else ''))
+    sm.append('  rows dropped by --xcheck-map: %d%s'
+              % (len(xc_mapped_off), (': ' + ', '.join(xc_mapped_off)) if xc_mapped_off else ''))
     sm.append('')
     sm.append('CHECKS')
     sm += ['  ' + x for x in checks]
