@@ -26,15 +26,11 @@ SKELETONS = {'rk86_machine': 'src/rtl/rk86_machine.v',
              'karabas_keyboard': 'src/rtl/karabas_keyboard.v'}
 BOUNDARIES = {'machine', 'keyboard', 'video', 'sound', 'memory', 'platform'}
 FIELDS = ['signal', 'bits', 'go', 'mini', 'minig', 'boundary', 'target', 'note']
-# iverilog diagnostics on manifest files that ISE accepts (docs/contract.md); not fixed
-# in this series. Any other diagnostic fails the check.
-# (file, line, a distinctive part of the message). The follow-up lines without file:line
+# Known iverilog diagnostics on manifest files that ISE accepts, as
+# (file, line, a distinctive part of the message); empty since PR13. Any other diagnostic
+# fails the check. The follow-up lines without file:line
 # (error count, "Elaboration failed") are accepted only when iverilog exits non-zero.
-KNOWN_IVERILOG = {('k580wm80a.v', 47, 'Unable to bind'),
-                  ('k580wm80a.v', 47, 'Unable to elaborate'),
-                  ('k580wm80a.v', 49, 'declared here'),
-                  ('k580ww55.v', 29, 'does not have any delay'),
-                  ('k580ww55.v', 29, 'runtime infinite loop')}
+KNOWN_IVERILOG = set()  # PR13: the RTL elaborates in iverilog without findings
 IVERILOG_FOLLOWUP = re.compile(r'^\d+ error\(s\) during elaboration\.$|^Elaboration failed$')
 KEYWORDS = {'module', 'endmodule', 'input', 'output', 'inout', 'wire', 'reg', 'integer',
             'assign', 'always', 'begin', 'end', 'if', 'else', 'case', 'endcase', 'default',

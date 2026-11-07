@@ -13,9 +13,7 @@ Usage, from any directory:
             the passing run)
 --jobs      runs at the same time (default 1)
 The sources are those of src/rk86_machine.prj, src/rk86_candidate.v and the testbench. The build
-goes to build/sim/candidate/ (ignored by git). Sim copies, made there: iverilog refuses two
-constructs of the RTL that XST accepts (docs/contract.md, Known defects), as in
-src/sim/machine/run_machine_sim.py.
+goes to build/sim/candidate/ (ignored by git).
 Exit code 0 when the testbench prints RESULT: PASS and no ERROR line (and each negative run
 fails by its check), 1 otherwise, 2 when a tool is missing or a build fails.
 """
@@ -35,11 +33,6 @@ TB = 'src/sim/candidate/tb_rk86_candidate.v'
 BIOS = 'src/roms/BIOS.BIN'
 FONT = 'src/roms/FONT.BIN'
 OUT = os.path.join('build', 'sim', 'candidate')
-SIM_COPIES = [  # (file, old, new): each old text exactly once
-    ('src/rtl/k580wm80a.v', 'assign inte_o = inte[1];', ''),
-    ('src/rtl/k580wm80a.v', 'reg[1:0] inte;', 'reg[1:0] inte; assign inte_o = inte[1];'),
-    ('src/rtl/k580ww55.v', 'always begin', 'always @(*) begin'),
-]
 # cpu_ready without !vid_rd is not among them: in 10 frames the CPU then steps while vid_rd
 # only on steps that do not read the memory, and only the sanity check of the testbench fails.
 NEGATIVES = [  # (name, what, file, old, new, the ERROR text that must appear)
@@ -82,9 +75,6 @@ def build_and_run(name, frames, iverilog, vvp, env, mutant=None):
     for rel in manifest_files() + [CANDIDATE, TB]:
         with open(os.path.join(ROOT, rel), encoding='utf-8', newline='') as f:
             text = f.read()
-        for file, old, new in SIM_COPIES:
-            if file == rel:
-                text = substitute(text, old, new, 'sim copy ' + rel)
         if mutant and mutant[0] == rel:
             text = substitute(text, mutant[1], mutant[2], 'negative ' + rel)
         dst = os.path.join(src, os.path.basename(rel))

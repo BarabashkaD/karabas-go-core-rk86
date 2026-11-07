@@ -44,9 +44,9 @@ reg FS,FZ,FA,FP,FC,_FA;
 reg rd_,intproc;
 assign rd = rd_&~intproc;
 assign inta_n = ~(rd_&intproc);
+reg[1:0] inte;
 assign inte_o = inte[1];
 
-reg[1:0] inte;
 reg jmp,call,halt;
 reg save_alu,save_a,save_r,save_rp,read_r,read_rp;
 reg incdec,xthl,xchg,sphl,daa;

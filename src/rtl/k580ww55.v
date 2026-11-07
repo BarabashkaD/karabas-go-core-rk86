@@ -26,7 +26,7 @@ module k580ww55(
 
 //reg[6:0] mode;
 
-always begin
+always @(*) begin
 	case (addr)
 	2'b00: odata = ipa;
 	2'b01: odata = ipb;

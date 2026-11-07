@@ -8,7 +8,7 @@ This guide is for a platform other than the Karabas boards (for example the Anal
 - The platform provides: the memory (RAM, ROM and their loading), the font ROM, the keyboard adapter, the sound output, the display (a frame buffer), the device of the window A000-BFFF, the reset and the clock enable.
 - Data: `src/roms/BIOS.BIN` (2 KB, the stock monitor; the testbenches run it), `src/roms/BIOSSD.BIN` (4 KB, the monitor of the Karabas boards, with the SD card in the window A000-BFFF), `src/roms/FONT.BIN` (1 KB, the font).
 - License: modified BSD (`src/LICENSE.TXT`). The CPU, DMA, CRT and PPI are the replica of Dmitry Tselikov (2011); the DMA, CRT and PPI files say "This realization is not fully operational" (`k580wt57.v:16`, `k580wg75.v:16`, `k580ww55.v:18`): they implement what the Radio-86RK uses.
-- Two constructs that XST accepts are refused by iverilog (contract.md, section 7): `k580wm80a.v` uses `inte` before its declaration (`k580wm80a.v:47, 49`), and `k580ww55.v` has an `always` without an event control (`k580ww55.v:29`). The runners in `src/sim` change them in copies under `build/sim` only (`SIM_COPIES` in `src/sim/machine/run_machine_sim.py`). Other synthesis tools have not been tried on these files; these two constructs are the likely first thing to change when porting to another tool: declare `inte` before its use, and give the `always` block an event control (`@(*)`), as the copies do (not checked with another tool).
+- The sources elaborate unchanged in XST, Quartus Prime Lite 25.1std (synthesis of the build candidate for the Cyclone V 5CEBA4F23C8, checked) and Icarus Verilog 13.0. The testbenches compile them directly, without copies.
 
 ## 2. Clock and clock enable
 

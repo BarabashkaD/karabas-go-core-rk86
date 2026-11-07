@@ -22,9 +22,7 @@ step comes 1 ce cycle after a waited one) [, ref].
 frac and random must write the traces of g line by line; the stall runs must give the bus
 transactions of g apart from the status poll of the BIOS (normalize) and the dots and DMA cycles
 of g in the last two frames; ref must write the traces of g.
-The build goes to build/sim/machine/ (ignored by git). Sim copies, made there: iverilog refuses
-two constructs of the RTL that XST accepts (docs/contract.md, Known defects): k580wm80a.v uses
-inte before its declaration, k580ww55.v has an always without an event control.
+The build goes to build/sim/machine/ (ignored by git).
 Exit code 0 when every run and comparison passes and every negative run fails, 1 otherwise,
 2 when a tool is missing or a build fails.
 """
@@ -43,11 +41,6 @@ RTL = ['src/rtl/rk86_machine.v', 'src/rtl/rk86_video.v', 'src/rtl/rk86_video_str
 BIOS = 'src/roms/BIOS.BIN'
 FONT = 'src/roms/FONT.BIN'
 OUT = os.path.join('build', 'sim', 'machine')
-SIM_COPIES = [  # (file, old, new): each old text exactly once
-    ('src/rtl/k580wm80a.v', 'assign inte_o = inte[1];', ''),
-    ('src/rtl/k580wm80a.v', 'reg[1:0] inte;', 'reg[1:0] inte; assign inte_o = inte[1];'),
-    ('src/rtl/k580ww55.v', 'always begin', 'always @(*) begin'),
-]
 RUNS = {
     'g': {'CE_MODE': 0},
     'frac': {'CE_MODE': 1},
@@ -110,7 +103,7 @@ def substitute(text, old, new, what):
 
 
 def prepare(out, mutant=None, ref_rev=None):
-    """Writes the sources of one build into out/src: the RTL with the sim copies (and the
+    """Writes the sources of one build into out/src: the RTL (with the
     mutant), the testbench, and for ref_rev the reference machine and video of that revision."""
     src = os.path.join(out, 'src')
     os.makedirs(src, exist_ok=True)
@@ -118,9 +111,6 @@ def prepare(out, mutant=None, ref_rev=None):
     for rel in [TB] + RTL:
         with open(os.path.join(ROOT, rel), encoding='utf-8', newline='') as f:
             text = f.read()
-        for file, old, new in SIM_COPIES:
-            if file == rel:
-                text = substitute(text, old, new, 'sim copy ' + rel)
         if mutant and mutant[1] == rel:
             text = substitute(text, mutant[2], mutant[3], 'negative ' + mutant[0])
         path = os.path.join(src, os.path.basename(rel))
