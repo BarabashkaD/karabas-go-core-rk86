@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_machine.v b/src/rtl/rk86_machine.v
+index b38517b..83c9175 100644
+--- a/src/rtl/rk86_machine.v
++++ b/src/rtl/rk86_machine.v
+@@ -123,7 +123,7 @@ end
+ reg dma_we_q, crt_we_q, crt_rd_q;
+ always @(posedge clk50)
+ 	if(ce) begin dma_we_q <= dma_we_n; crt_we_q <= crt_we_n; crt_rd_q <= crt_rd_n; end
+-wire dma_we_ce = ce ? dma_we_n : dma_we_q;
++wire dma_we_ce = dma_we_n;
+ wire crt_we_ce = ce ? crt_we_n : crt_we_q;
+ wire crt_rd_ce = ce ? crt_rd_n : crt_rd_q;
+ wire ppa1_we_ce = ppa1_we_n | ~ce;

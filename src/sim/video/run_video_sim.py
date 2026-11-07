@@ -11,10 +11,12 @@ Usage, from any directory:
                 frac (160 of 297 clk), random (pseudo-random, about 1 of 2, from --seed)
 --seed          the seed of --ce random (default 1)
 --stream        another rk86_video_stream source, for a negative check (default: the one of the tree)
---negative      run rk86_video with pix_ce not qualified by ce (NEGATIVE below; --ce frac unless
-                another pattern is given): the testbench must fail with its check; exit 0 when it does
+--negative      after the normal run, run rk86_video with pix_ce not qualified by ce (NEGATIVE below,
+                the patch negative/<name>.patch; --ce frac unless another pattern is given): the
+                testbench must fail with its check
 The build goes to build/sim/video/ (ignored by git). Exit code 0 when the testbench prints
-RESULT: PASS and no ERROR line, 1 otherwise, 2 when a tool is missing or the build fails.
+RESULT: PASS and no ERROR line (with --negative also: the fault is caught), 1 otherwise, 2 when a
+tool is missing, the build fails or the patch does not apply.
 """
 import argparse
 import os
@@ -31,8 +33,7 @@ FONT = 'src/roms/FONT.BIN'
 CE_MODES = {'full': 0, 'frac': 1, 'random': 2}
 OUT = os.path.join('build', 'sim', 'video')
 VIDEO = 'src/rtl/rk86_video.v'
-NEGATIVE = ('pix_ce_without_ce', 'assign pix_ce = ce && state == 2\'b00;', 'assign pix_ce = state == 2\'b00;',
-            'pix_ce on a clk with ce = 0')
+NEGATIVE = ('pix_ce_without_ce', 'pix_ce on a clk with ce = 0')
 
 
 def main():
@@ -58,26 +59,44 @@ def main():
         return 2
     env = dict(os.environ)
     env['PATH'] = bindir + os.pathsep + env.get('PATH', '')
+    tools = (iverilog, vvp, env)
+    rc, ok = run(a, tools, a.ce, False)
+    if not a.negative:
+        return rc
+    if rc == 2:
+        return 2
+    nrc, caught = run(a, tools, 'frac' if a.ce == 'full' else a.ce, True)
+    if nrc == 2:
+        return 2
+    return 0 if ok and caught else 1
+
+
+def run(a, tools, ce, negative):
+    """One build and run. Returns (rc, ok): rc 2 for a failed build or patch, else 0 when ok (a
+    normal run passes, a negative run fails by its check) and 1 when not."""
+    iverilog, vvp, env = tools
     out = os.path.join(ROOT, OUT)
     os.makedirs(out, exist_ok=True)
-    if a.negative and a.ce == 'full':
-        a.ce = 'frac'
-    exe = os.path.join(out, '%s_%s_%d%s.vvp' % (TOP, a.ce, a.font_latency, '_negative' if a.negative else ''))
+    exe = os.path.join(out, '%s_%s_%d%s.vvp' % (TOP, ce, a.font_latency, '_negative' if negative else ''))
     srcs = [os.path.join(ROOT, s) for s in SOURCES]
     if a.stream:
         srcs[SOURCES.index(STREAM)] = os.path.abspath(a.stream)
-    if a.negative:
-        with open(os.path.join(ROOT, VIDEO), encoding='utf-8', newline='') as f:
-            text = f.read()
-        if text.count(NEGATIVE[1]) != 1:
-            print('ERROR: negative %s: the text to break is not found once' % NEGATIVE[0])
-            return 2
-        neg = os.path.join(out, 'negative_' + os.path.basename(VIDEO))
-        with open(neg, 'w', encoding='utf-8', newline='') as f:
-            f.write(text.replace(NEGATIVE[1], NEGATIVE[2]))
-        srcs[SOURCES.index(VIDEO)] = neg
+    if negative:
+        sys.path.insert(0, os.path.join(ROOT, 'src', 'sim'))
+        from negative import apply_patch
+        patch = os.path.join(ROOT, 'src', 'sim', 'video', 'negative', NEGATIVE[0] + '.patch')
+        copy_root = os.path.join(out, 'copy')
+        dst = os.path.join(copy_root, VIDEO)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(os.path.join(ROOT, VIDEO), dst)
+        try:
+            apply_patch(ROOT, copy_root, patch)
+        except ValueError as e:
+            print('ERROR: negative %s: %s' % (NEGATIVE[0], e))
+            return 2, False
+        srcs[SOURCES.index(VIDEO)] = dst
     cmd = [iverilog, '-g2005', '-o', exe, '-s', TOP,
-           '-P%s.FONT_LATENCY=%d' % (TOP, a.font_latency), '-P%s.CE_MODE=%d' % (TOP, CE_MODES[a.ce]),
+           '-P%s.FONT_LATENCY=%d' % (TOP, a.font_latency), '-P%s.CE_MODE=%d' % (TOP, CE_MODES[ce]),
            '-P%s.SEED=%d' % (TOP, a.seed)] + srcs
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     build_out = (res.stdout + res.stderr).strip()
@@ -85,7 +104,7 @@ def main():
         print(build_out)
     if res.returncode:
         print('ERROR: iverilog exit %d' % res.returncode)
-        return 2
+        return 2, False
     font = os.path.join(ROOT, FONT).replace(os.sep, '/')
     res = subprocess.run([vvp, '-n', exe, '+font=' + font], capture_output=True, text=True,
                          env=env, cwd=ROOT)
@@ -94,14 +113,14 @@ def main():
     lines = [l.strip() for l in text.splitlines()]
     ok = (res.returncode == 0 and 'RESULT: PASS' in lines
           and not any(l.startswith('ERROR') for l in lines))
-    if a.negative:
-        caught = not ok and any(l.startswith('ERROR') and NEGATIVE[3] in l for l in lines)
+    if negative:
+        caught = not ok and any(l.startswith('ERROR') and NEGATIVE[1] in l for l in lines)
         print('run_video_sim: negative %s %s (ce %s)' % (NEGATIVE[0], 'FAILED as expected' if caught else
-              'NOT CAUGHT (expected: %s)' % NEGATIVE[3], a.ce))
-        return 0 if caught else 1
-    print('run_video_sim: %s (font latency %d, ce %s%s)' % ('PASS' if ok else 'FAIL', a.font_latency, a.ce,
+              'NOT CAUGHT (expected: %s)' % NEGATIVE[1], ce))
+        return (0 if caught else 1), caught
+    print('run_video_sim: %s (font latency %d, ce %s%s)' % ('PASS' if ok else 'FAIL', a.font_latency, ce,
           ', stream ' + os.path.basename(a.stream) if a.stream else ''))
-    return 0 if ok else 1
+    return (0 if ok else 1), ok
 
 
 if __name__ == '__main__':

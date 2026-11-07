@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_video.v b/src/rtl/rk86_video.v
+index 90ce38d..389ee72 100644
+--- a/src/rtl/rk86_video.v
++++ b/src/rtl/rk86_video.v
+@@ -101,7 +101,7 @@ end
+ //--------- outputs --------------
+ assign hrtc   = hr_wg75;
+ assign vrtc   = vr_wg75;
+-assign pix_ce = ce && state == 2'b00;
++assign pix_ce = state == 2'b00;
+ assign pix    = data[5];
+ 
+ endmodule

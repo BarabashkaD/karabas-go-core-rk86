@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_machine.v b/src/rtl/rk86_machine.v
+index b38517b..dbb9970 100644
+--- a/src/rtl/rk86_machine.v
++++ b/src/rtl/rk86_machine.v
+@@ -113,7 +113,7 @@ always @(posedge clk50) begin
+ 		else begin cpu_cnt <= 0; cpu_ce2 <= ~hlda; end
+ 	end
+ 	if(ce) hldareg <= {hldareg[9:0],hlda};
+-	if(reset|ce) startup <= reset|(startup&~addrbus[15]);
++	startup <= reset|(startup&~addrbus[15]);
+ end
+ 
+ // The DMA and the CRT take a register write (rise of iwe_n) or a status read (rise of

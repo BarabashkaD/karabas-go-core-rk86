@@ -1,0 +1,12 @@
+diff --git a/src/rtl/rk86_video.v b/src/rtl/rk86_video.v
+index 90ce38d..e2ee040 100644
+--- a/src/rtl/rk86_video.v
++++ b/src/rtl/rk86_video.v
+@@ -58,7 +58,6 @@ assign cce = ce && d_cnt==3'b000 && state == 2'b01; // wg75 chip enable signal
+ assign font_addr = {ichar[6:0],line[2:0]};
+ 
+ always @(posedge clk)
+-if (ce)
+ begin
+ 
+ 	// 3x divider to get 16MHz clock from 48MHz

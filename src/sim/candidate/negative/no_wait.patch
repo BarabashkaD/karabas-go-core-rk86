@@ -1,0 +1,13 @@
+diff --git a/src/rk86_candidate.v b/src/rk86_candidate.v
+index 688e625..b02f092 100644
+--- a/src/rk86_candidate.v
++++ b/src/rk86_candidate.v
+@@ -139,7 +139,7 @@ end
+ 
+ wire cpu_hit = cpu_tag == {rom, cpu_a} && (!cpu_tag[16] || rom_busy == 7'd0);
+ assign mem_di = vid_rd ? vid_q : !cpu_tag[16] ? ram_q : rom_busy == 7'd0 ? rom_q : 8'hFF;
+-assign cpu_ready = cpu_hit && !vid_rd;
++assign cpu_ready = 1'b1;
+ 
+ //--------- the native video and its stream --------------
+ wire pix_ce, pix;

@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_video.v b/src/rtl/rk86_video.v
+index 90ce38d..5d8feec 100644
+--- a/src/rtl/rk86_video.v
++++ b/src/rtl/rk86_video.v
+@@ -53,7 +53,7 @@ reg[5:0] data;
+ 
+ assign hr_wg75 = h_cnt >= 10'd468 && h_cnt < 10'd516 ? 1'b0 : 1'b1; // wg75 hsync 
+ assign vr_wg75 = v_cnt >= 10'd600 && v_cnt < 10'd620 ? 1'b0 : 1'b1; // wg75 vsync 
+-assign cce = ce && d_cnt==3'b000 && state == 2'b01; // wg75 chip enable signal 
++assign cce = d_cnt==3'b000 && state == 2'b01; // wg75 chip enable signal 
+ 
+ assign font_addr = {ichar[6:0],line[2:0]};
+ 

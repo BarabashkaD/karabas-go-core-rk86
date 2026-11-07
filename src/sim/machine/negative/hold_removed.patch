@@ -1,0 +1,14 @@
+diff --git a/src/rtl/rk86_machine.v b/src/rtl/rk86_machine.v
+index b38517b..e2179aa 100644
+--- a/src/rtl/rk86_machine.v
++++ b/src/rtl/rk86_machine.v
+@@ -104,9 +104,6 @@ wire cpu_ce = cpu_ce2 & ce & cpu_ready;
+ always @(posedge clk50) begin
+ 	if(reset) begin cpu_cnt<=0; cpu_ce2<=0; end
+ 	else if(ce) begin
+-		if(cpu_ce2 & ~cpu_ready) begin
+-			// the pending CPU step waits for cpu_ready
+-		end else
+ 		if((hldareg[10:9] == 2'b01) && ((cpu_rd == 1) || (cpu_wr_n == 0))) begin cpu_cnt <= 0; cpu_ce2 <= 1; end
+ 		else
+ 		if(cpu_cnt < 27) begin cpu_cnt <= cpu_cnt + 5'd1; cpu_ce2 <= 0; end

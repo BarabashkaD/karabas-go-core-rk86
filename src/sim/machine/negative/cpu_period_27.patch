@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_machine.v b/src/rtl/rk86_machine.v
+index b38517b..fd69255 100644
+--- a/src/rtl/rk86_machine.v
++++ b/src/rtl/rk86_machine.v
+@@ -109,7 +109,7 @@ always @(posedge clk50) begin
+ 		end else
+ 		if((hldareg[10:9] == 2'b01) && ((cpu_rd == 1) || (cpu_wr_n == 0))) begin cpu_cnt <= 0; cpu_ce2 <= 1; end
+ 		else
+-		if(cpu_cnt < 27) begin cpu_cnt <= cpu_cnt + 5'd1; cpu_ce2 <= 0; end
++		if(cpu_cnt < 26) begin cpu_cnt <= cpu_cnt + 5'd1; cpu_ce2 <= 0; end
+ 		else begin cpu_cnt <= 0; cpu_ce2 <= ~hlda; end
+ 	end
+ 	if(ce) hldareg <= {hldareg[9:0],hlda};

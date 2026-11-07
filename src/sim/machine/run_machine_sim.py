@@ -34,6 +34,8 @@ import subprocess
 import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+sys.path.insert(0, os.path.join(ROOT, 'src', 'sim'))
+from negative import apply_patch, patched_files  # noqa: E402
 TOP = 'tb_rk86_machine'
 TB = 'src/sim/machine/tb_rk86_machine.v'
 RTL = ['src/rtl/rk86_machine.v', 'src/rtl/rk86_video.v', 'src/rtl/rk86_video_stream.v',
@@ -51,43 +53,22 @@ RUNS = {
 }
 REF = {'CE_MODE': 0, 'SYNC_MEM': 0}
 NEGATIVE_FRAMES = 2
-NEGATIVE = [  # (name, file, old, new, run, the ERROR it must give): the gating broken on purpose
-    ('video_without_ce', 'src/rtl/rk86_video.v',
-     'always @(posedge clk)\nif (ce)\nbegin', 'always @(posedge clk)\nbegin', 'frac',
-     'a state changed on a clk edge with ce = 0'),
-    ('cpu_cnt_without_ce', 'src/rtl/rk86_machine.v',
-     '\telse if(ce) begin\n', '\telse begin\n', 'frac',
-     'a state changed on a clk edge with ce = 0'),
-    ('crt_write_without_hold', 'src/rtl/rk86_machine.v',
-     'wire crt_we_ce = ce ? crt_we_n : crt_we_q;', 'wire crt_we_ce = crt_we_n;', 'frac',
-     'CRT write edge on a clk with ce = 0'),
-    ('ppi_write_without_ce', 'src/rtl/rk86_machine.v',
-     'wire ppa1_we_ce = ppa1_we_n | ~ce;', 'wire ppa1_we_ce = ppa1_we_n;', 'frac',
-     'PPI write on a clk with ce = 0'),
-    ('cpu_step_without_ready', 'src/rtl/rk86_machine.v',
-     'wire cpu_ce = cpu_ce2 & ce & cpu_ready;', 'wire cpu_ce = cpu_ce2 & ce;', 'stall',
-     'CPU step without cpu_ready'),
-    ('hold_removed', 'src/rtl/rk86_machine.v',
-     '\t\tif(cpu_ce2 & ~cpu_ready) begin\n\t\t\t// the pending CPU step waits for cpu_ready\n\t\tend else\n', '', 'stall',
-     'a wait ended without a CPU step'),
-    ('dma_write_without_hold', 'src/rtl/rk86_machine.v',
-     'wire dma_we_ce = ce ? dma_we_n : dma_we_q;', 'wire dma_we_ce = dma_we_n;', 'frac',
-     'DMA write edge on a clk with ce = 0'),
-    ('crt_read_without_hold', 'src/rtl/rk86_machine.v',
-     'wire crt_rd_ce = ce ? crt_rd_n : crt_rd_q;', 'wire crt_rd_ce = crt_rd_n;', 'frac',
-     'CRT read edge on a clk with ce = 0'),
-    ('cce_without_ce', 'src/rtl/rk86_video.v',
-     'assign cce = ce && d_cnt==3\'b000 && state == 2\'b01;', 'assign cce = d_cnt==3\'b000 && state == 2\'b01;', 'frac',
-     'cce of rk86_video on a clk with ce = 0'),
-    ('hldareg_without_ce', 'src/rtl/rk86_machine.v',
-     '\tif(ce) hldareg <= {hldareg[9:0],hlda};', '\thldareg <= {hldareg[9:0],hlda};', 'frac',
-     'a state changed on a clk edge with ce = 0'),
-    ('startup_without_ce', 'src/rtl/rk86_machine.v',
-     '\tif(reset|ce) startup <= reset|(startup&~addrbus[15]);', '\tstartup <= reset|(startup&~addrbus[15]);', 'frac',
-     'a state changed on a clk edge with ce = 0'),
+NEGATIVE = [  # (name, run, the ERROR it must give); the fault is negative/<name>.patch
+    ('video_without_ce', 'frac', 'a state changed on a clk edge with ce = 0'),
+    ('cpu_cnt_without_ce', 'frac', 'a state changed on a clk edge with ce = 0'),
+    ('crt_write_without_hold', 'frac', 'CRT write edge on a clk with ce = 0'),
+    ('ppi_write_without_ce', 'frac', 'PPI write on a clk with ce = 0'),
+    ('cpu_step_without_ready', 'stall', 'CPU step without cpu_ready'),
+    ('hold_removed', 'stall', 'a wait ended without a CPU step'),
+    ('dma_write_without_hold', 'frac', 'DMA write edge on a clk with ce = 0'),
+    ('crt_read_without_hold', 'frac', 'CRT read edge on a clk with ce = 0'),
+    ('cce_without_ce', 'frac', 'cce of rk86_video on a clk with ce = 0'),
+    ('hldareg_without_ce', 'frac', 'a state changed on a clk edge with ce = 0'),
+    ('startup_without_ce', 'frac', 'a state changed on a clk edge with ce = 0'),
 ]
-NEGATIVE_REF = ('cpu_period_27', 'src/rtl/rk86_machine.v', 'if(cpu_cnt < 27)', 'if(cpu_cnt < 26)', 'ref',
-                'differs from the code before the clock enable')
+NEGATIVE_REF = ('cpu_period_27', 'ref', 'differs from the code before the clock enable')
+NEGATIVE_DIR = 'src/sim/machine/negative'
+MEM = 'src/sim/machine/tb_rk86_mem.v'
 # The status poll of the BIOS (FACE, after the CRT start): FAE0 MOV A,M reads the CRT status
 # (C001) once, then FAE1-FAE6 (MOV A,M / ANI 20 / JZ FAE1) read it until bit 5 (irq: the end of
 # the screen) is set. How many times depends on when the CPU gets there in the frame, so a stall
@@ -102,22 +83,26 @@ def substitute(text, old, new, what):
     return text.replace(old, new)
 
 
-def prepare(out, mutant=None, ref_rev=None):
-    """Writes the sources of one build into out/src: the RTL (with the
-    mutant), the testbench, and for ref_rev the reference machine and video of that revision."""
-    src = os.path.join(out, 'src')
-    os.makedirs(src, exist_ok=True)
-    paths = []
-    for rel in [TB] + RTL:
-        with open(os.path.join(ROOT, rel), encoding='utf-8', newline='') as f:
-            text = f.read()
-        if mutant and mutant[1] == rel:
-            text = substitute(text, mutant[2], mutant[3], 'negative ' + mutant[0])
-        path = os.path.join(src, os.path.basename(rel))
-        with open(path, 'w', encoding='utf-8', newline='') as f:
-            f.write(text)
-        paths.append(path)
+def prepare(out, mutant=None, ref_rev=None, mem=None):
+    """Returns the source paths of one build: the RTL and testbench in place, the memory model
+    (the files of the list mem, or MEM), and, for a mutant, copies under out/copy of the files its
+    patch changes, with the patch applied there; for ref_rev also the reference machine and video."""
+    paths = [os.path.join(ROOT, rel) for rel in [TB] + RTL]
+    paths.extend([os.path.abspath(m) for m in mem] if mem else [os.path.join(ROOT, MEM)])
+    if mutant:
+        patch = os.path.join(ROOT, NEGATIVE_DIR, mutant[0] + '.patch')
+        copy_root = os.path.join(out, 'copy')
+        for rel in patched_files(patch):
+            dst = os.path.join(copy_root, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.join(ROOT, rel) not in paths:
+                raise ValueError('%s is not compiled in this run' % rel)
+            shutil.copyfile(os.path.join(ROOT, rel), dst)
+            paths[paths.index(os.path.join(ROOT, rel))] = dst
+        apply_patch(ROOT, copy_root, patch)
     if ref_rev:
+        src = os.path.join(out, 'src')
+        os.makedirs(src, exist_ok=True)
         for rel, mod in (('src/rtl/rk86_machine.v', 'rk86_machine'), ('src/rtl/rk86_video.v', 'rk86_video')):
             res = subprocess.run(['git', '-C', ROOT, 'show', '%s:%s' % (ref_rev, rel)],
                                  capture_output=True, text=True, encoding='utf-8')
@@ -131,14 +116,19 @@ def prepare(out, mutant=None, ref_rev=None):
     return paths
 
 
-def build_and_run(tools, name, params, frames, seed, mutant=None, ref_rev=None):
+def build_and_run(tools, name, params, frames, seed, mutant=None, ref_rev=None, mem=None):
     iverilog, vvp, env = tools
     out = os.path.join(ROOT, OUT, name)
     os.makedirs(out, exist_ok=True)
     for f in ('bus.txt', 'video.txt'):
         if os.path.exists(os.path.join(out, f)):
             os.remove(os.path.join(out, f))
-    srcs = prepare(out, mutant, ref_rev)
+    try:
+        srcs = prepare(out, mutant, ref_rev, mem)
+    except ValueError as e:   # a setup error: the patch does not apply, or touches a file not compiled here
+        if not mutant:
+            raise
+        return name, None, 'ERROR: negative %s: %s' % (mutant[0], e)
     exe = os.path.join(out, TOP + '.vvp')
     p = dict(params, FRAMES=frames, SEED=seed)
     cmd = [iverilog, '-g2005', '-o', exe, '-s', TOP] + ['-P%s.%s=%d' % (TOP, k, v) for k, v in sorted(p.items())]
@@ -330,6 +320,7 @@ def main():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--ref-rev')
     ap.add_argument('--negative', action='store_true')
+    ap.add_argument('--mem', nargs='+', help='a tb_rk86_mem model, and the files it instantiates, to compile in place of src/sim/machine/tb_rk86_mem.v')
     ap.add_argument('--self-test', action='store_true')
     a = ap.parse_args()
     if a.self_test:
@@ -355,12 +346,12 @@ def main():
     if a.negative:
         negs = list(NEGATIVE) + ([NEGATIVE_REF] if a.ref_rev else [])
         for m in negs:
-            params = REF if m[4] == 'ref' else RUNS[m[4]]
-            jobs.append(('negative_' + m[0], params, NEGATIVE_FRAMES, m, a.ref_rev if m[4] == 'ref' else None))
+            params = REF if m[1] == 'ref' else RUNS[m[1]]
+            jobs.append(('negative_' + m[0], params, NEGATIVE_FRAMES, m, a.ref_rev if m[1] == 'ref' else None))
     results = {}
-    expect = {'negative_' + m[0]: m[5] for m in NEGATIVE + [NEGATIVE_REF]}
+    expect = {'negative_' + m[0]: m[2] for m in NEGATIVE + [NEGATIVE_REF]}
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
-        futs = [ex.submit(build_and_run, tools, n, p, f, a.seed, m, r) for n, p, f, m, r in jobs]
+        futs = [ex.submit(build_and_run, tools, n, p, f, a.seed, m, r, a.mem) for n, p, f, m, r in jobs]
         for fu in concurrent.futures.as_completed(futs):
             name, ok, text = fu.result()
             neg = name.startswith('negative_')

@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_machine.v b/src/rtl/rk86_machine.v
+index b38517b..383b7ff 100644
+--- a/src/rtl/rk86_machine.v
++++ b/src/rtl/rk86_machine.v
+@@ -126,7 +126,7 @@ always @(posedge clk50)
+ wire dma_we_ce = ce ? dma_we_n : dma_we_q;
+ wire crt_we_ce = ce ? crt_we_n : crt_we_q;
+ wire crt_rd_ce = ce ? crt_rd_n : crt_rd_q;
+-wire ppa1_we_ce = ppa1_we_n | ~ce;
++wire ppa1_we_ce = ppa1_we_n;
+ 
+ k580wm80a CPU(.clk(clk50), .ce(cpu_ce), .reset(reset),
+    .idata(cpu_i), .addr(addrbus), .sync(cpu_sync), .rd(cpu_rd), .wr_n(cpu_wr_n),
