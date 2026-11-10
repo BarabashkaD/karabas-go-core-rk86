@@ -31,48 +31,81 @@ always @(posedge clk) begin
     if (f2) hold_s <= hrq;
     if (f1) hlda <= hold_s;
 end
-// the 8275 (D9; [D79] Fig. 30): DRQ falls at WR↓ with DACK, rises after WR↑ while the burst has characters left
+// the 8275 (D9; [D79] Fig. 30): DRQ falls at WR↓ with DACK, rises after WR↑ while the burst has characters left;
+// with hold_drq a burst-mode requester ([C78] 12-100, 12-105): DRQ held high until the DACK of the last cycle
 integer bleft = 0;
-reg ior_q = 1'b1, dack_q = 1'b1;
+reg ior_q = 1'b1, dack_q = 1'b1, hold_drq = 1'b0;
 always @(posedge clk) begin
     ior_q <= ior_n_o; dack_q <= dack_n[2];
-    if (!ior_n_o && ior_q && !dack_n[2]) drq2 <= 1'b0;
-    if (ior_n_o && !ior_q && !dack_q) begin bleft = bleft - 1; if (bleft > 0) drq2 <= 1'b1; end
+    if (!ior_n_o && ior_q && !dack_n[2] && !hold_drq) drq2 <= 1'b0;
+    if (hold_drq && !dack_n[2] && dack_q && bleft == 1) drq2 <= 1'b0;
+    if (ior_n_o && !ior_q && !dack_q) begin bleft = bleft - 1; if (bleft > 0 && !hold_drq) drq2 <= 1'b1; end
 end
-integer n16 = 0, s1 = -1000, rel, transfers = 0, holds = 0, aen_n = 0, errors = 0, samp = -1000, last_s1 = -1000;
-reg ext = 1'b1, first = 1'b1, adstb_q = 1'b0, hrq_q = 1'b0;
+integer n16 = 0, s1 = -1000, rel = -1000, transfers = 0, holds = 0, aen_n = 0, errors = 0, samp = -1000, last_s1 = -1000;
+integer conts = 0;
+reg ext = 1'b1, first = 1'b1, adstb_q = 1'b0, hrq_q = 1'b0, aen_q = 1'b0, open = 1'b0;
+reg cont_exp = 1'b0;               // the S4 decision of the data sheet: DRQ and HLDA at the θ↓ that starts S4 (rel 27)
+reg [4:0] aen_h = 5'd0;            // AEN of the last five samples, [0] the newest
 reg [15:0] exp_a = 16'h76D0;
 reg [7:0] v;
 task err(input [8*32-1:0] what, input integer x); begin
-    $display("ERROR: vt57: %0s %0d (transfer %0d)", what, x, transfers); errors = errors + 1; end endtask
+    $display("ERROR: vt57: %0s %0d (transfer %0d)", what, x, transfers); errors = errors + 1;
+    if (errors >= 20) begin $display("FATAL: vt57: too many errors"); $finish; end
+end endtask
+task finish_transfer; begin
+    open = 1'b0;
+    transfers = transfers + 1;
+    exp_a = transfers == 2340 ? 16'h76D0 : exp_a + 16'd1;   // autoload from channel 3
+end endtask
 always @(posedge clk) if (ce16) begin
     if (f2_fall && drq2 && !hrq && !aen) samp = n16;           // the DRQ sample in SI
     if (adstb && !adstb_q) begin                               // ADSTB rose at θ↑(S1) = edge 4
+        if (open) finish_transfer;                             // the previous transfer ended with S4 → S1
         s1 = n16 - 5;
-        if (s1 - samp != 27) err("latency", s1 - samp);
-        if (!first && s1 - last_s1 != 72) err("period", s1 - last_s1);
-        first = 1'b0; last_s1 = s1;
+        // AEN at rel 0-3 (the last four samples) and rel -1: rises at θ↓(S1), stays high from a previous S4
+        if (aen_h[3:0] !== 4'hF || aen_h[4] !== cont_exp) err("aen rise", aen_h);
+        if (cont_exp) begin
+            if (s1 - last_s1 != 36) err("burst period", s1 - last_s1);
+            conts = conts + 1;
+        end else begin
+            if (s1 - samp != 27) err("latency", s1 - samp);
+            if (!first && s1 - last_s1 != 72) err("period", s1 - last_s1);
+        end
+        first = 1'b0; last_s1 = s1; open = 1'b1;
     end
     rel = n16 - s1 - 1;
-    if (rel >= 0 && rel <= 44) begin
-        if (aen !== (rel <= 39)) err("aen at", rel);
+    if (rel == 26) cont_exp = drq2 && hlda;                   // this sample holds the inputs of the θ↓ at edge 27
+    if (rel >= 0 && rel <= 39) begin
+        if (aen !== 1'b1) err("aen at", rel);
         if (adstb !== (rel >= 4 && rel <= 12)) err("adstb at", rel);
         if (!dack_n[2] !== (rel >= 9 && rel <= 35)) err("dack at", rel);
         if (!ior_n_o !== (rel >= 13 && rel <= 35)) err("ior at", rel);
         if (!memw_n !== (rel >= (ext ? 13 : 22) && rel <= 30)) err("memw at", rel);
         if (!memr_n || !iow_n_o) err("strobe at", rel);
-        if (hrq !== (rel <= 30)) err("hrq at", rel);
+        if (hrq !== (rel <= 30 || cont_exp)) err("hrq at", rel);
         if (tc !== (transfers == 2339 && rel >= 22 && rel <= 30)) err("tc at", rel);
-        if (rel <= 39 && a_o !== exp_a) err("address at", rel);
-        if (rel >= 40 && transfers != 2339 && a_o !== exp_a + 16'd1) err("address update at", rel);
-        if (rel == 44) begin
-            transfers = transfers + 1;
-            exp_a = transfers == 2340 ? 16'h76D0 : exp_a + 16'd1;   // autoload from channel 3
-        end
+        if (a_o !== exp_a) err("address at", rel);
     end
+    if (rel >= 40 && rel <= 44) begin                          // reached only without a following S1
+        if (cont_exp) begin
+            if (rel == 40) err("no S1 after S4 at", rel);
+        end else begin
+            if (aen !== 1'b0) err("aen at", rel);
+            if (adstb !== 1'b0) err("adstb at", rel);
+            if (dack_n[2] !== 1'b1) err("dack at", rel);
+            if (ior_n_o !== 1'b1) err("ior at", rel);
+            if (memw_n !== 1'b1) err("memw at", rel);
+            if (!memr_n || !iow_n_o) err("strobe at", rel);
+            if (hrq !== 1'b0) err("hrq at", rel);
+            if (tc !== 1'b0) err("tc at", rel);
+            if (transfers != 2339 && a_o !== exp_a + 16'd1) err("address update at", rel);
+        end
+        if (rel == 44 && open) finish_transfer;
+    end
+    if (aen_q && !aen && rel != 40) err("aen fall at", rel); // AEN falls only at θ↑ in the SI after the last S4
     if (hrq && !hrq_q) holds = holds + 1;
     if (aen) aen_n = aen_n + 1;
-    adstb_q = adstb; hrq_q = hrq;
+    adstb_q = adstb; hrq_q = hrq; aen_q = aen; aen_h = {aen_h[3:0], aen};
     n16 = n16 + 1;
 end
 task wr57(input [3:0] ad, input [7:0] dd); begin
@@ -112,8 +145,15 @@ initial begin
     wr57(4'd8, 8'h84); ext = 1'b0;
     run_to(2357);
     if (holds != transfers) err("hold periods", holds);
-    if (aen_n != 40 * transfers) err("aen total", aen_n);
-    if (errors == 0) $display("PASS: vt57 (%0d transfers, %0d HOLD periods, %0d ce16 with AEN)", transfers, holds, aen_n);
+    // burst mode ([C78] 12-100, Fig. 6 S4 → S1 on HRQ · HLDA): three requests of 8 cycles, each one HOLD period
+    hold_drq = 1'b1;
+    run_to(2381);
+    if (conts != 21) err("back-to-back transfers", conts);
+    if (holds != transfers - conts) err("hold periods with bursts", holds);
+    // AEN: rel 0-35 of every transfer and rel 36-39 once per HOLD period (AEN↓ at θ↑ of the SI after the last S4)
+    if (aen_n != 36 * transfers + 4 * (transfers - conts)) err("aen total", aen_n);
+    if (errors == 0) $display("PASS: vt57 (%0d transfers, %0d back-to-back, %0d HOLD periods, %0d ce16 with AEN)",
+        transfers, conts, holds, aen_n);
     $finish;
 end
 endmodule

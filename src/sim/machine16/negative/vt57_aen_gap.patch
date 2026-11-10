@@ -1,0 +1,22 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index cb411ee..117ea20 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -164,7 +164,7 @@ always @(posedge clk) begin
+                         dack_on <= 1'b0; ior_n_o <= 1'b1; memr_n <= 1'b1;
+                         done <= 1'b1; done_ch <= ch; done_tc <= tc_now; done_upd <= upd_cyc; upd_cyc <= 1'b0;
+                         if (cont) begin
+-                            state <= S1; ch <= cont_ch;
++                            state <= S1; ch <= cont_ch; aen <= 1'b1;
+                             if (reload && cont_ch == 2'd2) begin ad[2] <= ad[3]; tr[2] <= tr[3]; reload <= 1'b0; upd_cyc <= 1'b1; end
+                         end else state <= SI;                                // no DRQ, or HLDA lost (DMA-15)
+                     end
+@@ -174,7 +174,7 @@ always @(posedge clk) begin
+         //---------------- θ↑: HRQ, AEN↓, ADSTB, the write strobes, TC, MARK, READY, the address update
+         if (th_up) begin
+             hrq <= state == S0 || state == S1 || state == S2 || state == S3 || state == SW || (state == S4 && cont);
+-            if (state == SI || state == S0) aen <= 1'b0;                 // not the bus master (rel 40)
++            if (state == SI || state == S0 || (state == S4 && cont)) aen <= 1'b0;                // not the bus master (rel 40)
+             adstb <= state == S1;
+             if (state == S2) begin
+                 if (wr_cyc) ior_n_o <= 1'b0;
