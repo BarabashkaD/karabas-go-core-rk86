@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..4c4ea91 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -169,7 +169,7 @@ always @(posedge clk) begin
+                         if (cont) begin
+                             state <= S1; ch <= cont_ch;
+                             if (reload && cont_ch == 2'd2) begin ad[2] <= ad[3]; tr[2] <= tr[3]; reload <= 1'b0; upd_cyc <= 1'b1; end
+-                        end else state <= SI;                                // no DRQ, or HLDA lost (DMA-15)
++                        end else state <= p4[2] ? S0 : SI;                                // no DRQ, or HLDA lost (DMA-15)
+                     end
+                 default: state <= SI;
+             endcase

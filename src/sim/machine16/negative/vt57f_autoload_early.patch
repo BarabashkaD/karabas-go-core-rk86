@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..d4a8f3e 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -193,7 +193,7 @@ always @(posedge clk) begin
+             tc <= (state == S3 || state == SW) && tc_now;
+             mark <= (state == S3 || state == SW) && cnt[6:0] == 7'd0;                // DMA-11: the TC window
+             if (state == S3 && tc_now) tcs[ch] <= 1'b1;
+-            if (state == S3 && tc_now && mode[7] && ch == 2'd2) begin upd <= 1'b1; reload <= 1'b1; end  // with TC↑ (DMA-24)
++            if (state == S3 && tc_now && mode[7] && ch == 2'd2) begin upd <= 1'b1; ad[2] <= ad[3]; tr[2] <= tr[3]; end  // with TC↑ (DMA-24)
+             if (state == S3 || state == SW) rdy <= ready;
+         end
+         if (upd_now) begin

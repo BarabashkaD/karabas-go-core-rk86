@@ -64,6 +64,20 @@ TESTS = {
                  negatives=[('vt57_extra_state', 'ERROR: vt57: dack at 36'), ('vt57_s4_to_s1', 'ERROR: vt57: period 36'),
                             ('vt57_address_early', 'ERROR: vt57: address'), ('vt57_one_edge', 'ERROR: vt57: aen rise 0'),
                             ('vt57_aen_gap', 'ERROR: vt57: aen at 31'), ('vt57_hrq_late', 'ERROR: vt57: latency 36')]),
+    'vt57_func': dict(top='tb_vt57_func', files=['src/sim/machine16/tb_vt57_func.v', 'src/rtl/rk86_16/k580vt57.v'],
+                      negatives=[('vt57f_priority_fixed', 'ERROR: vt57f: rotating'),
+                                 ('vt57f_read_strobes', 'ERROR: vt57f: read cycle'),
+                                 ('vt57f_ready_ignored', 'ERROR: vt57f: ready'),
+                                 ('vt57f_tc_stop_ignored', 'ERROR: vt57f: tc stop'),
+                                 ('vt57f_autoload_early', 'ERROR: vt57f: autoload'),
+                                 ('vt57f_mark_tc_only', 'ERROR: vt57f: mark'),
+                                 ('vt57f_ff_not_reset', 'ERROR: vt57f: first/last'),
+                                 ('vt57f_hlda_lost_s0', 'ERROR: vt57f: hlda lost'),
+                                 ('vt57f_update_at_s4', 'ERROR: vt57f: autoload'),
+                                 ('vt57f_cont_no_hlda', 'ERROR: vt57f: hlda lost'),
+                                 ('vt57f_verify_wait', 'ERROR: vt57f: verify'),
+                                 ('vt57f_b2b_no_reload', 'ERROR: vt57f: autoload'),
+                                 ('vt57f_address_switch', 'ERROR: vt57f: priority: address at 36')]),
 }  # the tasks that add testbenches add their entries
 
 

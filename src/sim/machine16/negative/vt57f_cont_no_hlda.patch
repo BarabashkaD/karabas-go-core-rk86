@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..7c5cbfd 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -161,7 +161,7 @@ always @(posedge clk) begin
+                 S3, SW:
+                     if (rdy || cyc == 2'b00) begin
+                         state <= S4;
+-                        cont <= hlda && p4[2]; cont_ch <= p4[1:0];
++                        cont <= p4[2]; cont_ch <= p4[1:0];
+                     end else state <= SW;
+                 S4: begin
+                         dack_on <= 1'b0; ior_n_o <= 1'b1; memr_n <= 1'b1;

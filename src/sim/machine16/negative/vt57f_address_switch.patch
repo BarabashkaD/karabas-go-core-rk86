@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..fd25152 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -110,7 +110,7 @@ wire uupd = done_upd;
+ assign dack_n = dack_on ? ~(4'd1 << ch) : 4'hF;
+ // the finished transfer's address holds from the θ↓ that ends S4 to the update at θ↑ (rel 36-39), also when the next
+ // cycle switches channel or reloads channel 2 (TAHR: valid after IOR↑ / MEMR↑)
+-assign a_o = done ? done_a : ad[ch];
++assign a_o = ad[ch];
+ wire [15:0] rsel = a_i[0] ? tr[a_i[2:1]] : ad[a_i[2:1]];
+ assign d_o = a_i[3] ? {3'b000, upd, tcs} : (ff ? rsel[15:8] : rsel[7:0]);
+ 
