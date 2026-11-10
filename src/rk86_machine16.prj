@@ -1,0 +1,7 @@
+verilog work "rtl/rk86_16/k580vm80a.v"
+verilog work "rtl/rk86_16/rk86_clocks16.v"
+verilog work "rtl/rk86_16/k580vv55.v"
+verilog work "rtl/rk86_16/k580vt57.v"
+verilog work "rtl/rk86_16/k580vg75.v"
+verilog work "rtl/rk86_16/rk86_video16.v"
+verilog work "rtl/rk86_16/rk86_machine16.v"

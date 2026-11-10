@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/rk86_machine16.v b/src/rtl/rk86_16/rk86_machine16.v
+index a4353f2..4f87772 100644
+--- a/src/rtl/rk86_16/rk86_machine16.v
++++ b/src/rtl/rk86_16/rk86_machine16.v
+@@ -70,7 +70,7 @@ assign bus_a = aen ? dma_a : cpu_a;
+ wire [6:0] cc;
+ wire [3:0] lc;
+ wire vsp, lten, rvv;
+-k580vg75 crt(.clk(clk), .cclk(cclk_fall), .cs_n(~sel_crt), .rd_n(rd_line_n), .wr_n(cpu_wr_n & ior_n), .a0(bus_a[0]),
++k580vg75 crt(.clk(clk), .cclk(cclk_fall), .cs_n(~sel_crt), .rd_n(rd_line_n), .wr_n(cpu_wr_n), .a0(bus_a[0]),
+     .d_i(aen ? mem_di : cpu_do), .d_o(crt_o), .drq(crt_drq), .dack_n(dack_n[2]), .irq(), .lpen(1'b0),
+     .hrtc(hrtc), .vrtc(vrtc), .cc(cc), .lc(lc), .la(), .vsp(vsp), .lten(lten), .rvv(rvv), .hglt(), .gpa());
+ //---------------- the keyboard 8255 (8000-9FFF): PA rows out, PB columns in, PC7-PC5 shift keys, PC4 tape in

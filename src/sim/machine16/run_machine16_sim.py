@@ -14,8 +14,9 @@ TEST: names from TESTS (default: all). --list prints the names and exits.
 --mem       replace src/sim/machine16/tb_rk86_mem16.v in the file list of a test by these files
 --frames    sets the parameter FRAMES of the top
 A test entry of TESTS: top, files (repository-relative paths, or a function that returns them),
-params (-P<top>.<name>=<value>), plusargs (+<name>=<value> on the vvp line), negatives
-[(name, expected text)].
+params (-P<top>.<name>=<value>), plusargs (+<name>=<value> on the vvp line), hexfiles
+{name: repository-relative binary} (written by write_hexfiles as <name>.hex, one byte per line, into
+the output folder, and passed as +<name>=<name>.hex), negatives [(name, expected text)].
 Pass rule: vvp exits 0, prints a line that starts with PASS and no line that starts with ERROR or
 contains FATAL. Outputs: build/sim/machine16/<test>/ (ignored by git).
 Exit code 0 when every run passes and every fault is caught, 1 otherwise, 2 when a tool is missing
@@ -155,6 +156,11 @@ TESTS = {
     'video16': dict(top='tb_video16', files=['src/sim/machine16/tb_video16.v', 'src/rtl/rk86_16/rk86_video16.v'],
                     negatives=[('video_load_at_0', 'ERROR: video16: dot'), ('video_shift_order', 'ERROR: video16: dot'),
                                ('video_lten_unlatched', 'ERROR: video16: lten'), ('video_vsp_ignored', 'ERROR: video16: vsp')]),
+    'machine16': dict(top='tb_rk86_machine16',
+                      files=lambda: ['src/sim/machine16/cpu_power_up.vh', 'src/sim/machine16/tb_rk86_machine16.v', MEM]
+                      + prj_files('src/rk86_machine16.prj'),
+                      hexfiles=dict(bios='src/roms/BIOS.BIN', font='src/roms/FONT.BIN'),
+                      negatives=[('crt_wr_without_ior', 'ERROR: glue: 8275 WR')]),
 }  # the tasks that add testbenches add their entries
 
 
@@ -169,6 +175,21 @@ def prj_files(prj):
             if line.startswith('verilog') and len(parts) >= 3:
                 files.append(os.path.normpath(os.path.join(base, parts[1])).replace(os.sep, '/'))
     return files
+
+
+def write_hexfiles(test, out_dir, prefix=''):
+    """Writes the data files of a test (TESTS key 'hexfiles': {name: repository-relative binary}) as
+    <out_dir>/<prefix><name>.hex for $readmemh (one byte per line, two hex digits). Returns
+    {name: file name} (bare names, relative to out_dir)."""
+    made = {}
+    for name, rel in test.get('hexfiles', {}).items():
+        with open(os.path.join(ROOT, rel), 'rb') as f:
+            data = f.read()
+        fname = '%s%s.hex' % (prefix, name)
+        with open(os.path.join(out_dir, fname), 'w', newline='\n') as f:
+            f.write(''.join('%02x\n' % b for b in data))
+        made[name] = fname
+    return made
 
 
 def run(name, test, tools, mem=None, frames=None, fault=None):
@@ -206,6 +227,7 @@ def run(name, test, tools, mem=None, frames=None, fault=None):
     if res.returncode:
         return False, 'ERROR: iverilog: ' + (res.stdout + res.stderr)
     plusargs = ['+%s=%s' % (k, v) for k, v in test.get('plusargs', {}).items()]
+    plusargs += ['+%s=%s' % (k, v) for k, v in write_hexfiles(test, out).items()]
     res = subprocess.run([vvp, '-n', exe] + plusargs, capture_output=True, text=True, cwd=out, env=env)
     text = res.stdout + res.stderr
     lines = [l.strip() for l in text.splitlines()]
