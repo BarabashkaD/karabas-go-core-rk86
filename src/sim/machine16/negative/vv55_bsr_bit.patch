@@ -1,8 +1,8 @@
 diff --git a/src/rtl/rk86_16/k580vv55.v b/src/rtl/rk86_16/k580vv55.v
-index b52d7cb..4efec3d 100644
+index ac555b5..e6b1ed6 100644
 --- a/src/rtl/rk86_16/k580vv55.v
 +++ b/src/rtl/rk86_16/k580vv55.v
-@@ -121,7 +121,7 @@ always @(posedge clk) begin
+@@ -126,7 +126,7 @@ always @(posedge clk) begin
                          ibfa <= 1'b0; ibfb <= 1'b0; obfa_n <= 1'b1; obfb_n <= 1'b1;
                          intea1 <= 1'b0; intea2 <= 1'b0; inteb <= 1'b0;
                      end else begin

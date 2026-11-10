@@ -1,8 +1,8 @@
 diff --git a/src/rtl/rk86_16/k580vv55.v b/src/rtl/rk86_16/k580vv55.v
-index b52d7cb..db8725a 100644
+index ac555b5..2ce7a3f 100644
 --- a/src/rtl/rk86_16/k580vv55.v
 +++ b/src/rtl/rk86_16/k580vv55.v
-@@ -117,7 +117,6 @@ always @(posedge clk) begin
+@@ -122,7 +122,6 @@ always @(posedge clk) begin
                  default:
                      if (wd[7]) begin                                                  // PPI-3, D14: every write
                          mode <= wd[6:0];

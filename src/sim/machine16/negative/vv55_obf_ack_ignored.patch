@@ -1,8 +1,8 @@
 diff --git a/src/rtl/rk86_16/k580vv55.v b/src/rtl/rk86_16/k580vv55.v
-index b52d7cb..f141714 100644
+index ac555b5..64fcec1 100644
 --- a/src/rtl/rk86_16/k580vv55.v
 +++ b/src/rtl/rk86_16/k580vv55.v
-@@ -107,7 +107,7 @@ always @(posedge clk) begin
+@@ -112,7 +112,7 @@ always @(posedge clk) begin
          if (b_m1 && b_in && !stbb_n) begin ib <= pb_i; ibfb <= 1'b1; end
          if (rdb_q && !rd_b) ibfb <= 1'b0;
          // strobed output: OBF (low = full) set by WR↑, reset by ACK low

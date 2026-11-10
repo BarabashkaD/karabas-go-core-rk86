@@ -12,13 +12,18 @@ k580vv55 dut(.clk(clk), .reset(reset), .cs_n(cs_n), .rd_n(rd_n), .wr_n(wr_n), .a
     .pc_i(pc_i), .pc_o(pc_o), .pc_oe(pc_oe));
 integer errors = 0, k;
 reg [7:0] v, cw, mid_pc;
+// INTR pulse watch ([C78] Fig. 7, 9, 13: INTR stays low from RD↓ / WR↓ until STB↑ / ACK↑): `arm` before a
+// rd / wr starts the watch at its RD↑ / WR↑; every clk with INTR (PC[wbit]) high counts until `endw`
+reg arm = 1'b0, watch = 1'b0; reg [2:0] wbit = 3'd3; integer pulses = 0;
+always @(posedge clk) if (watch && pc_o[wbit]) pulses = pulses + 1;
 task chk(input ok, input [8*48-1:0] what); begin
     if (!ok) begin $display("ERROR: vv55: %0s at %0t", what, $time); errors = errors + 1; end end endtask
+task endw(input [8*48-1:0] what); begin chk(pulses == 0, what); watch = 1'b0; pulses = 0; end endtask
 task wr(input [1:0] ad, input [7:0] dd); begin
     @(negedge clk) begin cs_n = 1'b0; a = ad; d = dd; end
     @(negedge clk) wr_n = 1'b0;
     repeat (2) @(negedge clk); mid_pc = pc_o;
-    repeat (2) @(negedge clk); wr_n = 1'b1;
+    repeat (2) @(negedge clk); wr_n = 1'b1; watch = arm; arm = 1'b0;
     @(negedge clk) cs_n = 1'b1;
     repeat (2) @(negedge clk);
 end endtask
@@ -26,7 +31,7 @@ task rd(input [1:0] ad, output [7:0] dd); begin
     @(negedge clk) begin cs_n = 1'b0; a = ad; end
     @(negedge clk) rd_n = 1'b0;
     repeat (2) @(negedge clk); mid_pc = pc_o;
-    repeat (2) @(negedge clk); dd = d_o; rd_n = 1'b1;
+    repeat (2) @(negedge clk); dd = d_o; rd_n = 1'b1; watch = arm; arm = 1'b0;
     @(negedge clk) cs_n = 1'b1;
     repeat (2) @(negedge clk);
 end endtask
@@ -63,9 +68,10 @@ initial begin
     chk(pc_o[3] == 1'b0, "mode 1 input: intr without inte");
     wr(2'd3, 8'h09); chk(pc_o[3] == 1'b1, "mode 1 input: intr");
     rd(2'd2, v); chk(v[5:3] == 3'b111, "mode 1 input: status word");
-    rd(2'd0, v); chk(v == 8'h3C, "mode 1 input: latch");
+    wbit = 3'd3; arm = 1'b1; rd(2'd0, v); chk(v == 8'h3C, "mode 1 input: latch");
     chk(mid_pc[5] == 1'b1 && mid_pc[3] == 1'b0, "mode 1 input: ibf / intr during rd");
     chk(pc_o[5] == 1'b0 && pc_o[3] == 1'b0, "mode 1 input: ibf after rd");
+    endw("intr pulse after rd: mode 1 port A input");
     // PPI-29 a port C byte write changes only the bits that are outputs (ruling): with B0h PC7, PC6
     // (control bit 3 = 0) and PC2-PC0 (bit 0 = 0) are outputs; IBF (PC5), PC4 and INTR (PC3) and INTE A stay
     v = pc_o; wr(2'd2, 8'hFF);
@@ -76,9 +82,10 @@ initial begin
     chk(pa_oe && pc_oe[7] && pc_oe[3] && !pc_oe[6], "mode 1 output: pins");
     wr(2'd3, 8'h0D);
     chk(pc_o[3] == 1'b1, "mode 1 output: intr with empty buffer");
-    wr(2'd0, 8'h5A);
+    wbit = 3'd3; arm = 1'b1; wr(2'd0, 8'h5A);
     chk(mid_pc[3] == 1'b0, "mode 1 output: intr during wr");
     chk(pa_o == 8'h5A && pc_o[7] == 1'b0 && pc_o[3] == 1'b0, "mode 1 output: obf after wr");
+    endw("intr pulse after wr: mode 1 port A output");
     @(negedge clk) pc_i[6] = 1'b0; repeat (3) @(negedge clk);
     chk(pc_o[7] == 1'b1 && pc_o[3] == 1'b0, "mode 1 output: obf after ack");
     pc_i[6] = 1'b1; repeat (2) @(negedge clk);
@@ -88,9 +95,12 @@ initial begin
     pc_i = 8'hFF; wr(2'd3, 8'h86); wr(2'd3, 8'h05);
     pb_i = 8'h66; @(negedge clk) pc_i[2] = 1'b0; repeat (3) @(negedge clk); pc_i[2] = 1'b1; repeat (2) @(negedge clk);
     chk(pc_o[1] == 1'b1 && pc_o[0] == 1'b1, "mode 1 input: port B ibf / intr");
-    rd(2'd1, v); chk(v == 8'h66 && pc_o[1] == 1'b0, "mode 1 input: port B");
-    wr(2'd3, 8'h84); wr(2'd3, 8'h05); wr(2'd1, 8'h99);
+    wbit = 3'd0; arm = 1'b1; rd(2'd1, v); chk(v == 8'h66 && pc_o[1] == 1'b0, "mode 1 input: port B");
+    endw("intr pulse after rd: mode 1 port B input");
+    wr(2'd3, 8'h84); wr(2'd3, 8'h05); chk(pc_o[0] == 1'b1, "mode 1 output: port B intr with empty buffer");
+    wbit = 3'd0; arm = 1'b1; wr(2'd1, 8'h99);
     chk(pb_oe && pb_o == 8'h99 && pc_o[1] == 1'b0, "mode 1 output: port B obf");
+    endw("intr pulse after wr: mode 1 port B output");
     @(negedge clk) pc_i[2] = 1'b0; repeat (3) @(negedge clk); pc_i[2] = 1'b1; repeat (2) @(negedge clk);
     chk(pc_o[1] == 1'b1 && pc_o[0] == 1'b1, "mode 1 output: port B ack");
     // PPI-8 mode 2: port A bidirectional, its buffer enabled by ACK; IBF PC5, STB PC4, OBF PC7, ACK PC6,
@@ -106,6 +116,18 @@ initial begin
     wr(2'd3, 8'h09); chk(pc_o[3] == 1'b1, "mode 2: intr by inte 2");
     rd(2'd2, v); chk(v[7:3] == 5'b10111, "mode 2: status word");
     rd(2'd0, v); chk(v == 8'h42 && pc_o[5] == 1'b0, "mode 2: input latch");
+    // mode 2 INTR: low from WR↓ (INTE 1) / RD↓ (INTE 2) with no pulse after WR↑ / RD↑, high again at
+    // ACK↑ / STB↑ with no delay ([C78] 12-87 Fig. 13)
+    wr(2'd3, 8'hC0); wr(2'd3, 8'h0D); chk(pc_o[3] == 1'b1, "mode 2: intr by inte 1, empty buffer");
+    wbit = 3'd3; arm = 1'b1; wr(2'd0, 8'h55); chk(pc_o[3] == 1'b0 && mid_pc[3] == 1'b0, "mode 2: intr after wr");
+    endw("intr pulse after wr: mode 2");
+    @(negedge clk) pc_i[6] = 1'b0; repeat (2) @(negedge clk); chk(pc_o[3] == 1'b0, "mode 2: intr during ack");
+    pc_i[6] = 1'b1; @(posedge clk) chk(pc_o[3] == 1'b1, "mode 2: intr at ack end");
+    wr(2'd3, 8'h0C); wr(2'd3, 8'h09); chk(pc_o[3] == 1'b0, "mode 2: intr without inte 1");
+    pa_i = 8'h24; @(negedge clk) pc_i[4] = 1'b0; repeat (2) @(negedge clk); chk(pc_o[3] == 1'b0, "mode 2: intr during stb");
+    pc_i[4] = 1'b1; @(posedge clk) chk(pc_o[3] == 1'b1, "mode 2: intr at stb end");
+    wbit = 3'd3; arm = 1'b1; rd(2'd0, v); chk(v == 8'h24 && pc_o[3] == 1'b0 && mid_pc[3] == 1'b0, "mode 2: intr after rd");
+    endw("intr pulse after rd: mode 2");
     // PPI-10 the RK86 control words: 8Ah keyboard (A out, B in, C upper in, C lower out); 90h ROM disk
     wr(2'd3, 8'h8A); chk(pa_oe && !pb_oe && pc_oe == 8'h0F, "rk86 word 8Ah");
     wr(2'd3, 8'h90); chk(!pa_oe && pb_oe && pc_oe == 8'hFF, "rk86 word 90h");

@@ -42,11 +42,16 @@ wire rd_a = !cs_n && !rd_n && a == 2'd0;
 wire rd_b = !cs_n && !rd_n && a == 2'd1;
 wire wr_a = !cs_n && !wr_n && a == 2'd0;
 wire wr_b = !cs_n && !wr_n && a == 2'd1;
+// the RD / WR terms of INTR, held through the clk that takes RD↑ / WR↑ (IBF / OBF change at its end), so
+// INTR stays low from RD↓ / WR↓ until STB↑ / ACK↑ ([C78] Fig. 7, 9, 13)
+wire rd_at = rd_a || rda_q, rd_bt = rd_b || rdb_q;
+wire wr_at = wr_a || (wr_n && !wr_q && wcs && wa == 2'd0);
+wire wr_bt = wr_b || (wr_n && !wr_q && wcs && wa == 2'd1);
 // INTR ([C78] 12-84, 12-85, 12-87: INTR = IBF·INTE·STB·RD + OBF·INTE·ACK·WR, levels, OBF high = empty)
-wire intra = a_m2 ? ((ibfa && intea2 && stba_n && !rd_a) || (obfa_n && intea1 && acka_n && !wr_a))
-           : a_m1 ? (a_in ? (ibfa && intea1 && stba_n && !rd_a) : (obfa_n && intea1 && acka_n && !wr_a))
+wire intra = a_m2 ? ((ibfa && intea2 && stba_n && !rd_at) || (obfa_n && intea1 && acka_n && !wr_at))
+           : a_m1 ? (a_in ? (ibfa && intea1 && stba_n && !rd_at) : (obfa_n && intea1 && acka_n && !wr_at))
            : 1'b0;
-wire intrb = b_m1 ? (b_in ? (ibfb && inteb && stbb_n && !rd_b) : (obfb_n && inteb && ackb_n && !wr_b)) : 1'b0;
+wire intrb = b_m1 ? (b_in ? (ibfb && inteb && stbb_n && !rd_bt) : (obfb_n && inteb && ackb_n && !wr_bt)) : 1'b0;
 // port C: the handshake positions ([C78] 12-89 Mode Definition Summary)
 reg [7:0] ctl, ctl_out, ctl_val;
 always @(*) begin
