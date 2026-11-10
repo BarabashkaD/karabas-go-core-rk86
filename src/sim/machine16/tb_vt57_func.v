@@ -4,7 +4,8 @@
 // (S1 from ADSTB↑, the channel from DACK at rel 10) against the data sheet edges: AEN 0..39, ADSTB 4..12,
 // DACK 9..35, the read strobe 13..35, the write strobe 22..30 (extended 13..30), TC / MARK 22..30, HRQ to 30
 // (or on through a back-to-back S1), the address from rel 4 through rel 39; each SW adds 9 ([C78] 12-109, 12-110).
-// The update flag is read on d_o with A = 8 (the status register) between the slave accesses.
+// The status register (TC bits, update flag) is read only through slave reads (CS low, A = 8, an IOR pulse), so only
+// outside S1-S4 (CS is ignored in master mode, DMA-14); every status read clears the TC bits (DMA-8).
 `default_nettype none
 `timescale 1ns/1ns
 module tb_vt57_func;
@@ -74,8 +75,8 @@ integer n16 = 0, s1 = -1000, rel, ntr = 0, errors = 0;
 integer s1_of [0:4095];
 reg [1:0] ch_of [0:4095];
 reg adstb_q = 1'b0;
-// the pin history: hist[n] = the sample at ce16 n, {0, HLDA, UP (d_o[4] with A = 8), MARK, TC, IOW, IOR, MEMW, MEMR,
-// DACK3-0, ADSTB, AEN, HRQ, A15-A0}
+// the pin history: hist[n] = the sample at ce16 n, {0, HLDA, 0, MARK, TC, IOW, IOR, MEMW, MEMR, DACK3-0, ADSTB, AEN,
+// HRQ, A15-A0}
 localparam HB = 18;
 reg [31:0] hist [0:(1 << HB) - 1];
 integer quiet = 0, holds = 0, hrq_up = -1000, hlda_up = -1000, rdy_hi = -1, rdy_t0 = 0;
@@ -88,7 +89,7 @@ always @(posedge clk) if (ce16) begin
         ch_of[ntr] = !dack_n[0] ? 2'd0 : !dack_n[1] ? 2'd1 : !dack_n[2] ? 2'd2 : 2'd3;
         ntr = ntr + 1;
     end
-    hist[n16 % (1 << HB)] = {1'b0, hlda, (a == 4'd8) ? d_o[4] : 1'bx, mark, tc, iow_n_o, ior_n_o, memw_n, memr_n,
+    hist[n16 % (1 << HB)] = {1'b0, hlda, 1'b0, mark, tc, iow_n_o, ior_n_o, memw_n, memr_n,
         dack_n, adstb, aen, hrq, a_o};
     if (hrq && !hrq_q) begin hrq_up = n16 - 1; holds = holds + 1; end          // the edge of the rise
     if (hlda && !hlda_q) hlda_up = n16 - 1;
@@ -145,9 +146,14 @@ task prog(input [1:0] ch, input [15:0] adr, input [15:0] cnt); begin
     exp_ad[ch] = adr; exp_tr[ch] = cnt; ctype[ch] = cnt[15:14];
     if (mode_tb[7] && ch == 2'd2) begin exp_ad[3] = adr; exp_tr[3] = cnt; end
 end endtask
-task rd8(input [3:0] ad, output [7:0] v); begin rd57(ad, v); a = 4'd8; end endtask
+// the register reads of the checks: real slave reads (CS low, IOR pulse, data taken while IOR is low), made only while
+// the CPU has the bus (HLDA and AEN low)
+task bus_free; begin
+    if (hlda || aen) chk(1'b0, "TB: a register read while the 8257 holds the bus");
+end endtask
+task rd8(input [3:0] ad, output [7:0] v); begin bus_free; rd57(ad, v); a = 4'd8; end endtask
 task rd16(input [3:0] ad, output [15:0] v); reg [7:0] lo, hi; begin
-    rd57(ad, lo); rd57(ad, hi); v = {hi, lo}; a = 4'd8;
+    bus_free; rd57(ad, lo); rd57(ad, hi); v = {hi, lo}; a = 4'd8;
 end endtask
 task wait_ce(input integer n); integer t0; begin
     t0 = n16; wait (n16 >= t0 + n); @(negedge clk);
@@ -243,13 +249,14 @@ task reg_is(input [3:0] ad, input [15:0] e, input [8*40-1:0] what); begin
     rd16(ad, v16);
     if (v16 !== e) begin $sformat(dmsg, "%0s: register %0d reads %h, expected %h", what, ad, v16, e); ck(1'b0, dmsg); end
 end endtask
-// the update flag (status bit 4 on d_o) at rel r of transfer j
-task upd_is(input integer j, input integer r, input e); reg [31:0] v; begin
-    v = h(s1_of[j], r);
-    if (v[29] !== e) begin
-        $sformat(dmsg, "update flag at %0d (transfer %0d) %b, expected %b", r, j - ntr0, v[29], e); ck(1'b0, dmsg);
-    end
-end endtask
+// a wait with its own bound: lim ce16 from now, then FATAL
+integer tlim;
+`define WAIT_B(lbl, cond, lim) \
+    tlim = n16 + (lim); \
+    fork : lbl \
+        begin wait (cond); disable lbl; end \
+        begin wait (n16 >= tlim); $display("FATAL: vt57f: %0s timed out", ctx); $finish; end \
+    join
 integer i, j, s, t, r;
 reg [31:0] hv;
 initial begin
@@ -414,26 +421,25 @@ initial begin
     rd8(4'd8, v8);                                               // clears the TC bit of check 9
     mode_set(8'hC4);                                             // autoload, TC stop, channel 2
     part("autoload", "DMA-10, DMA-24, [C78] 12-104, Fig. 5");
+    // the update flag through slave status reads while the CPU has the bus (between HOLD periods): set after the TC
+    // cycle, kept by a status read, cleared after the reload cycle; its edges inside S1-S4 are not visible to a CPU
     request(2, 2, 1'b0);                                         // A000, A001 (TC)
     wait_idle;
     run_ch(2, 2, 1'b1);
-    if (ntr - ntr0 == 2) begin
-        upd_is(ntr0 + 1, 21, 1'b0); upd_is(ntr0 + 1, 22, 1'b1); upd_is(ntr0 + 1, 44, 1'b1);
-    end
-    status_is(8'h14, "after the TC cycle");
-    status_is(8'h10, "the second read");
+    status_is(8'h14, "after the TC cycle");                      // UP and TC2; the read clears TC2
+    status_is(8'h10, "the second read");                         // UP not cleared by a status read
     part("autoload", "DMA-10, DMA-24, [C78] 12-103, 12-104");
-    request(2, 4, 1'b0);                                         // B000 (reload from S0), B001, B002 (TC), B000 (back to back)
+    request(2, 1, 1'b0);                                         // B000: the reload through S0
     wait_idle;
-    run_ch(4, 2, 1'b1);
-    if (ntr - ntr0 == 4) begin
-        upd_is(ntr0, 0, 1'b1); upd_is(ntr0, 39, 1'b1); upd_is(ntr0, 40, 1'b0);
-        upd_is(ntr0 + 2, 21, 1'b0); upd_is(ntr0 + 2, 22, 1'b1);
-        upd_is(ntr0 + 3, 39, 1'b1); upd_is(ntr0 + 3, 40, 1'b0);
-    end
+    run_ch(1, 2, 1'b0);
+    status_is(8'h00, "after the reload cycle");
+    part("autoload", "DMA-10, [C78] 12-103, 12-104");
+    request(2, 3, 1'b0);                                         // B001, B002 (TC), B000 (back-to-back reload)
+    wait_idle;
+    run_ch(3, 2, 1'b1);
     reg_is(4'd6, 16'hB000, "channel 3 after the reloads");
     reg_is(4'd7, 16'h8002, "channel 3 count after the reloads");
-    status_is(8'h04, "after the reload cycle");
+    status_is(8'h04, "after the back-to-back reload cycle");    // TC2 of B002; UP cleared by the reload cycle
     part("autoload", "DMA-22, DMA-24, [C78] 12-104");
     request(2, 2, 1'b0);                                         // B001, B002 (TC): the flag set again
     wait_idle;
@@ -490,7 +496,7 @@ initial begin
     mode_set(8'h02);
     prog(1, 16'hD000, 16'h4009);
     request(1, 10, 1'b0);
-    wait (ntr == ntr0 + 3); repeat (24) @(negedge clk);          // rel 10 + about 5 ce16: S2, IOR low
+    `WAIT_B(w13a, ntr == ntr0 + 3, 2000) repeat (24) @(negedge clk);          // rel 10 + about 5 ce16: S2, IOR low
     ck(!ior_n_o && !dack_n[1] && aen && hrq, "the third transfer not in S2");
     @(negedge clk) reset = 1'b1; repeat (4) @(negedge clk);
     ck(!aen && !hrq && !adstb && dack_n === 4'hF && memr_n && memw_n && ior_n_o && iow_n_o && !tc && !mark,
@@ -509,8 +515,8 @@ initial begin
     mode_set(8'h01);
     prog(0, 16'hE000, 16'h4003);
     request(0, 4, 1'b0);
-    wait (ntr == ntr0 + 2); wr57(4'd8, 8'h00);                   // a mode write in S2 / S3: ignored
-    wait (ntr == ntr0 + 3); wr57(4'd0, 8'h55);                   // an address write: ignored
+    `WAIT_B(w14a, ntr == ntr0 + 2, 2000) wr57(4'd8, 8'h00);                // a mode write in S2 / S3: ignored
+    `WAIT_B(w14b, ntr == ntr0 + 3, 2000) wr57(4'd0, 8'h55);                // an address write: ignored
     a = 4'd8;
     wait_idle;
     run_ch(4, 0, 1'b1);
@@ -521,9 +527,9 @@ initial begin
     mode_set(8'h04);
     prog(2, 16'hF000, 16'h4003);
     request(2, 4, 1'b0);
-    wait (ntr == ntr0 + 2); @(negedge clk) hlda_off = 1'b1;      // in S2 of the second transfer
+    `WAIT_B(w15a, ntr == ntr0 + 2, 2000) @(negedge clk) hlda_off = 1'b1;   // in S2 of the second transfer
     s = s1_of[ntr0 + 1];
-    wait (n16 > s + 1 + 100);
+    `WAIT_B(w15b, n16 > s + 1 + 100, 200)
     ck(ntr == ntr0 + 2, "S1 while HLDA is low");
     @(negedge clk) hlda_off = 1'b0;
     wait_idle;
@@ -550,10 +556,10 @@ initial begin
     prog(3, 16'h3A00, 16'h4000);
     @(negedge clk) begin hlda_off = 1'b1; t = n16; end
     request(3, 1, 1'b0);
-    wait (hrq_up > t);
+    `WAIT_B(w16a, hrq_up > t, 200)
     s = hrq_up;
-    wait (n16 > s + 20); request(0, 1, 1'b0);                    // a higher priority DRQ in S0
-    wait (n16 > s + 54); @(negedge clk) hlda_off = 1'b0;         // HLDA 5 Φ late: at f1 s + 61 instead of s + 16
+    `WAIT_B(w16b, n16 > s + 20, 100) request(0, 1, 1'b0);                 // a higher priority DRQ in S0
+    `WAIT_B(w16c, n16 > s + 54, 100) @(negedge clk) hlda_off = 1'b0;      // HLDA 5 Φ late: at f1 s + 61 instead of s + 16
     wait_idle;
     run_order(2, 8'h03, 1'b1);
     if (ntr - ntr0 >= 1) begin
@@ -564,6 +570,61 @@ initial begin
             $sformat(dmsg, "S1 %0d after HLDA, expected 7", s1_of[ntr0] - hlda_up); ck(1'b0, dmsg);
         end
     end
+
+    // 17. DMA-16 (SILENT, the accepted choice): every DRQ falls while in S0 → back to SI
+    part("s0 return", "DMA-16 SILENT choice, [C78] 12-105, Fig. 6");
+    mode_set(8'h02);
+    prog(1, 16'h1700, 16'h4000);
+    @(negedge clk) begin hlda_off = 1'b1; t = n16; end
+    request(1, 1, 1'b0);
+    `WAIT_B(w17a, hrq_up > t, 200)
+    s = hrq_up;
+    `WAIT_B(w17b, n16 > s + 20, 100) request(1, 0, 1'b0);       // DRQ1 down in S0, HLDA still low
+    `WAIT_B(w17c, n16 > s + 60, 100) @(negedge clk) hlda_off = 1'b0;
+    wait_ce(300);
+    t = 0;
+    for (r = 0; r <= 300; r = r + 1) begin                       // θ↓ s + 23 sees no DRQ → SI, HRQ↓ at θ↑ s + 27
+        hv = hist[(s + 1 + r) % (1 << HB)];
+        if (hv[16] !== (r < 27) && !t) begin
+            t = 1; $sformat(dmsg, "hrq %b at HRQ rise + %0d, expected low from + 27", hv[16], r); ck(1'b0, dmsg);
+        end
+    end
+    count_is(0);
+    @(negedge clk) t = n16;                                      // a new request starts from SI as usual
+    request(1, 1, 1'b0);
+    wait_idle;
+    run_ch(1, 1, 1'b0);
+    if (ntr - ntr0 == 1 && (hrq_up <= t || s1_of[ntr0] - hrq_up != 23)) begin
+        $sformat(dmsg, "S1 %0d after HRQ of the next request, expected 23", s1_of[ntr0] - hrq_up); ck(1'b0, dmsg);
+    end
+
+    // 18. DMA-20: A3 = 1 with A2-A0 ≠ 000: a write is ignored, a read returns the status (SILENT, the accepted choice)
+    part("addressing", "DMA-20 SILENT choice, [C78] 12-104, 12-105");
+    mode_set(8'h01);
+    prog(0, 16'h1800, 16'h4000);
+    wr57(4'd0, 8'h34);                                           // address 1834h, F/L 1
+    for (i = 9; i < 16; i = i + 1) wr57(i, 8'h00);              // as a mode write 00h they would disable CH-0, reset F/L
+    wr57(4'd0, 8'h12);                                           // the high byte: 1234h
+    a = 4'd8;
+    reg_is(4'd0, 16'h1234, "address after writes to A = 9-15");
+    reg_is(4'd1, 16'h4000, "count after writes to A = 9-15");
+    exp_ad[0] = 16'h1234;
+    rd8(4'd8, v8);                                               // clears the TC bits of checks 15-17
+    request(0, 1, 1'b0);                                        // channel 0 still enabled: one transfer (TC)
+    wait_idle;
+    run_ch(1, 0, 1'b0);
+    rd8(4'hB, v8);
+    if (v8 !== 8'h01) begin $sformat(dmsg, "read at A = 11: %h, expected the status 01", v8); ck(1'b0, dmsg); end
+    rd8(4'hD, v8);                                               // the read at A = 11 was a status read: TC0 cleared
+    if (v8 !== 8'h00) begin $sformat(dmsg, "read at A = 13: %h, expected the status 00", v8); ck(1'b0, dmsg); end
+
+    // 19. DMA-26: cycle type 11 (SILENT, the accepted choice): no strobes; DACK, AEN, TC, MARK as a transfer
+    part("illegal cycle", "DMA-26 SILENT choice, [C78] 12-100");
+    mode_set(8'h01);
+    prog(0, 16'h1900, 16'hC001);
+    request(0, 2, 1'b0);
+    wait_idle;
+    run_ch(2, 0, 1'b1);
 
     if (errors == 0) $display("PASS: vt57f (%0d transfers)", ntr);
     $finish;

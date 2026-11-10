@@ -73,11 +73,14 @@ TESTS = {
                                  ('vt57f_mark_tc_only', 'ERROR: vt57f: mark'),
                                  ('vt57f_ff_not_reset', 'ERROR: vt57f: first/last'),
                                  ('vt57f_hlda_lost_s0', 'ERROR: vt57f: hlda lost'),
-                                 ('vt57f_update_at_s4', 'ERROR: vt57f: autoload'),
                                  ('vt57f_cont_no_hlda', 'ERROR: vt57f: hlda lost'),
                                  ('vt57f_verify_wait', 'ERROR: vt57f: verify'),
                                  ('vt57f_b2b_no_reload', 'ERROR: vt57f: autoload'),
-                                 ('vt57f_address_switch', 'ERROR: vt57f: priority: address at 36')]),
+                                 ('vt57f_address_switch', 'ERROR: vt57f: priority: address at 36'),
+                                 ('vt57f_s0_no_return', 'ERROR: vt57f: s0 return'),
+                                 ('vt57f_mode_any_a', 'ERROR: vt57f: addressing'),
+                                 ('vt57f_status_a_only', 'ERROR: vt57f: addressing'),
+                                 ('vt57f_illegal_strobes', 'ERROR: vt57f: illegal cycle')]),
 }  # the tasks that add testbenches add their entries
 
 
