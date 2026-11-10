@@ -181,9 +181,12 @@ task build;
         // a B R field (92h) from row 3 position 1 to the end of the frame: every character blinks and is reversed
         // (S26), the field in force at the line ends (retrace) and into the vertical retrace
         row_begin(IM_INT, 3); pch; pfa(8'h92); row_end;
-        // End of Row at row 0 position 8, End of Screen at row 1 position 12
-        row_begin(IM_VSP, 0); pchs(8); pcode(8'hF0); row_end;
-        row_begin(IM_VSP, 1); pchs(12); pcode(8'hF2); row_end;
+        // End of Row at row 0 position 8, End of Screen at row 1 position 12; a GG = 01 field (84h, position 3) in
+        // force across the End of Row into row 1 (to 80h at position 4), an H field code (81h, position 10) after the
+        // End of Row ignored ([D79] 1-175: a field lasts to the next field code or the end of the frame; all
+        // characters after an End of Row are ignored); its FIFO byte is still taken (buffer input, 1-176)
+        row_begin(IM_VSP, 0); pchs(3); pfa(8'h84); pchs(4); pcode(8'hF0); pch; pfa(8'h81); row_end;
+        row_begin(IM_VSP, 1); pchs(4); pfa(8'h80); pchs(7); pcode(8'hF2); row_end;
         row_begin(IM_VSP, 2); row_end;
         row_begin(IM_VSP, 3); row_end;
         for (r = 0; r < NR; r = r + 1) begin row_begin(IM_PLAIN, r); row_end; end
