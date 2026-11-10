@@ -23,7 +23,7 @@ function [3:0] ie4_of(input [3:0] c);
     endcase
 endfunction
 integer n16 = 0, errors = 0, k, p, last_f1 = -1, last_dot = -1, last_cf = -1, f1_in_reset = 0;
-integer prev_p = -1;
+integer prev_p = -1, tcnt = 0, c_f1 = 0, c_f2 = 0, c_f2f = 0, c_dot = 0, c_cf = 0, c_cr = 0;
 reg prev_p3 = 1'b0, prev_sync = 1'b0, resin_s = 1'b0, rdyin_s = 1'b1, reset_q = 1'b1, ready_q = 1'b1;
 reg [3:0] cnt_q = 4'd0;
 task err(input [8*40-1:0] what, input integer v); begin
@@ -55,11 +55,19 @@ initial begin
             if (ready !== ready_q && !prev_p3) err("ready changed off p3", 0);
             if (prev_p3 && ready !== rdyin_s) err("ready", ready);
             // CLK-7, CLK-8: STSTB = NOR (SYNC at p8, RESET): low for the period p8 when SYNC is high, and
-            // while RESET is high ([D8224] 1-50 Fig. 1, 1-52 tDSS, tPW; [C78] 11-26)
-            if (prev_p >= 0 && ststb_n !== !((prev_p == 8 && prev_sync) || reset_q)) err("ststb at period", prev_p);
+            // while RESET is high, without a clock lag (the NOR sees the RESET of this sample) ([D8224] 1-50 Fig. 1, 1-52 tDSS, tPW; [C78] 11-26)
+            if (prev_p >= 0 && ststb_n !== !((prev_p == 8 && prev_sync) || reset)) err("ststb at period", prev_p);
             // IE4-1: the 7492 sequence; QA↑ every 2, QD↓ every 12, QD↑ 6 after QD↓
             if (ie4 !== ie4_of(cnt12)) err("ie4 sequence at count", cnt12);
             if (n16 > 0 && cnt12 !== (cnt_q == 4'd11 ? 4'd0 : cnt_q + 4'd1)) err("ie4 count", cnt12);
+            // IE4-2: the enables sit on the 7492 count; tcnt is the TB's own count (0..11 before this ce16),
+            // independent of the DUT's counter: QA↑ on an even count, QD↓ at 11, QD↑ at 5
+            if (dot_ce !== !tcnt[0]) err("dot_ce alignment at count", tcnt);
+            if (cclk_fall !== (tcnt == 11)) err("cclk_fall alignment at count", tcnt);
+            if (cclk_rise !== (tcnt == 5)) err("cclk_rise alignment at count", tcnt);
+            c_f1 = c_f1 + f1; c_f2 = c_f2 + f2; c_f2f = c_f2f + f2_fall;
+            c_dot = c_dot + dot_ce; c_cf = c_cf + cclk_fall; c_cr = c_cr + cclk_rise;
+            tcnt = tcnt == 11 ? 0 : tcnt + 1;
             if (dot_ce) begin if (last_dot >= 0 && n16 - last_dot != 2) err("dot_ce period", n16 - last_dot); last_dot = n16; end
             if (cclk_fall) begin if (last_cf >= 0 && n16 - last_cf != 12) err("cclk period", n16 - last_cf); last_cf = n16; end
             if (cclk_rise && last_cf >= 0 && n16 - last_cf != 6) err("cclk_rise after fall", n16 - last_cf);
@@ -71,6 +79,13 @@ initial begin
         end
     end
     if (n16 != 64 * 900) err("ce16 count", n16);
+    // a missing enable passes the per-event checks, so count over the run (9 ce16 per Φ1, 2 per dot, 12 per CCLK)
+    if (c_f1 != n16 / 9) err("f1 count", c_f1);
+    if (c_f2 != c_f1) err("f2 count", c_f2);
+    if (c_f2f != c_f1) err("f2_fall count", c_f2f);
+    if (c_dot < n16 / 2 - 1 || c_dot > n16 / 2 + 1) err("dot_ce count", c_dot);
+    if (c_cf < n16 / 12 - 1 || c_cf > n16 / 12 + 1) err("cclk_fall count", c_cf);
+    if (c_cr < n16 / 12 - 1 || c_cr > n16 / 12 + 1) err("cclk_rise count", c_cr);
     if (f1_in_reset == 0) err("enables stopped in reset", 0);
     if (errors == 0) $display("PASS: clocks16 (%0d ce16)", n16);
     $finish;

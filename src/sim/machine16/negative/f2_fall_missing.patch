@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/rk86_clocks16.v b/src/rtl/rk86_16/rk86_clocks16.v
+index ea89f09..77beaf1 100644
+--- a/src/rtl/rk86_16/rk86_clocks16.v
++++ b/src/rtl/rk86_16/rk86_clocks16.v
+@@ -14,7 +14,7 @@
+ //   cclk_fall, cclk_rise: QD (the 8275 CCLK, 1.333 MHz) falls / rises
+ //   cnt12    the count 0..11 before this ce16; ie4 = QD QC QB QA of that count
+ `default_nettype none
+-module rk86_clocks16 #(parameter F2_STEP = 2, parameter F2_FALL_STEP = 7) (
++module rk86_clocks16 #(parameter F2_STEP = 2, parameter F2_FALL_STEP = 9) (
+     input  wire       clk,
+     input  wire       ce16,
+     input  wire       resin_n,

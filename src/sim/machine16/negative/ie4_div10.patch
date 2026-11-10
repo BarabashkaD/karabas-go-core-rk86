@@ -1,8 +1,8 @@
 diff --git a/src/rtl/rk86_16/rk86_clocks16.v b/src/rtl/rk86_16/rk86_clocks16.v
-index 53a68af..5c4bcf6 100644
+index ea89f09..e660fb8 100644
 --- a/src/rtl/rk86_16/rk86_clocks16.v
 +++ b/src/rtl/rk86_16/rk86_clocks16.v
-@@ -39,7 +39,7 @@ reg [3:0] cnt = 4'd0;
+@@ -40,7 +40,7 @@ reg       ststb_sync = 1'b0;    // SYNC sampled at p8: the strobe term of the NO
  always @(posedge clk)
      if (ce16) begin
          step <= step == 4'd8 ? 4'd0 : step + 4'd1;
@@ -10,4 +10,4 @@ index 53a68af..5c4bcf6 100644
 +        cnt <= cnt == 4'd9 ? 4'd0 : cnt + 4'd1;
          phi1 <= step == 4'd0 || step == 4'd1;
          phi2 <= step >= F2_STEP && step <= F2_STEP + 4;
-         ststb_n <= !((sync && step == 4'd8) || reset);
+         ststb_sync <= sync && step == 4'd8;

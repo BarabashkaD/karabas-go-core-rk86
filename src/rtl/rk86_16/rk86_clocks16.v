@@ -8,7 +8,7 @@
 //   reset, ready: the RESIN / RDYIN flip-flops, clocked at p3 by the internal "Φ2 D", one period after
 //            Φ2↑ (tDRS / tDRH from STSTB↓, tDR to Φ2↓; [R86] p. 31 "on the leading edge of Φ2")
 //   ststb_n  NOR (SYNC at p8, RESET): low for the period p8 when SYNC is high (tDSS = 6tcy/9 after Φ2↑,
-//            tPW = tcy/9) and while RESET is high (Fig. 1)
+//            tPW = tcy/9) and, without a clock lag, while RESET is high (Fig. 1)
 // 7492 in divide-by-12 (QA to input B), Task 2 IE4-n:
 //   dot_ce   QA rises: every 2 periods, the 8 MHz dot clock of the ИР13
 //   cclk_fall, cclk_rise: QD (the 8275 CCLK, 1.333 MHz) falls / rises
@@ -27,7 +27,7 @@ module rk86_clocks16 #(parameter F2_STEP = 2, parameter F2_FALL_STEP = 7) (
     output reg        phi2 = 1'b0,
     output reg        reset = 1'b1,
     output reg        ready = 1'b1,
-    output reg        ststb_n = 1'b1,
+    output wire       ststb_n,
     output wire [3:0] ie4,
     output wire [3:0] cnt12,
     output wire       dot_ce,
@@ -36,18 +36,20 @@ module rk86_clocks16 #(parameter F2_STEP = 2, parameter F2_FALL_STEP = 7) (
 );
 reg [3:0] step = 4'd0;      // SILENT: the power-up phase of the 8224 against the ИЕ4 (both 0 here)
 reg [3:0] cnt = 4'd0;
+reg       ststb_sync = 1'b0;    // SYNC sampled at p8: the strobe term of the NOR, low for one period
 always @(posedge clk)
     if (ce16) begin
         step <= step == 4'd8 ? 4'd0 : step + 4'd1;
         cnt <= cnt == 4'd11 ? 4'd0 : cnt + 4'd1;
         phi1 <= step == 4'd0 || step == 4'd1;
         phi2 <= step >= F2_STEP && step <= F2_STEP + 4;
-        ststb_n <= !((sync && step == 4'd8) || reset);
+        ststb_sync <= sync && step == 4'd8;
         if (step == F2_STEP + 1) begin          // p3: "Φ2 D" (SILENT: one period after Φ2↑)
             reset <= !resin_n;
             ready <= rdyin;
         end
     end
+assign ststb_n = !(ststb_sync || reset);    // the NOR: RESET reaches STSTB without a clock lag
 assign f1 = ce16 && step == 4'd0;
 assign f2 = ce16 && step == F2_STEP;
 assign f2_fall = ce16 && step == F2_FALL_STEP;

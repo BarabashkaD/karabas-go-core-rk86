@@ -44,7 +44,11 @@ TESTS = {
                                 ('reset_on_f2_fall', 'ERROR: clocks16: reset changed off p3'),
                                 ('ststb_no_reset', 'ERROR: clocks16: ststb at period'),
                                 ('stopped_in_reset', 'ERROR: clocks16: f1 period'),
-                                ('ie4_div10', 'ERROR: clocks16: ie4 count')]),
+                                ('ie4_div10', 'ERROR: clocks16: ie4 count'),
+                                ('f2_fall_missing', 'ERROR: clocks16: f2_fall count'),
+                                ('dot_ce_odd', 'ERROR: clocks16: dot_ce alignment'),
+                                ('cclk_misaligned', 'ERROR: clocks16: cclk_fall alignment'),
+                                ('ststb_reset_lag', 'ERROR: clocks16: ststb at period')]),
 }  # the tasks that add testbenches add their entries
 
 

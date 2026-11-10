@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/rk86_clocks16.v b/src/rtl/rk86_16/rk86_clocks16.v
+index ea89f09..143556e 100644
+--- a/src/rtl/rk86_16/rk86_clocks16.v
++++ b/src/rtl/rk86_16/rk86_clocks16.v
+@@ -57,7 +57,7 @@ assign f2_fall = ce16 && step == F2_FALL_STEP;
+ wire [2:0] half = cnt[3:1];
+ assign ie4 = {half >= 3'd3, half == 3'd2 || half == 3'd5, half == 3'd1 || half == 3'd4, cnt[0]};
+ assign cnt12 = cnt;
+-assign dot_ce = ce16 && !cnt[0];
++assign dot_ce = ce16 && cnt[0];
+ assign cclk_fall = ce16 && cnt == 4'd11;
+ assign cclk_rise = ce16 && cnt == 4'd5;
+ endmodule
