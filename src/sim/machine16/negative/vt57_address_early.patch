@@ -1,0 +1,19 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index cb411ee..535ab9a 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -102,10 +102,10 @@ wire [3:0] en_after = mode[3:0] & ~(tc_off ? (4'd1 << ch) : 4'd0);
+ wire [1:0] top_after = mode[4] ? ch + 2'd1 : 2'd0;
+ wire [2:0] p4 = pick(drq & en_after, top_after);
+ // the address and count change at θ↑ after S4 ([C78] 12-109 TAH: valid through the strobes)
+-wire upd_now = th_up && done;
+-wire [1:0] uch = done_ch;
+-wire utc = done_tc;
+-wire uupd = done_upd;
++wire upd_now = th_dn && state == S4;
++wire [1:0] uch = ch;
++wire utc = tc_now;
++wire uupd = upd_cyc;
+ assign dack_n = dack_on ? ~(4'd1 << ch) : 4'hF;
+ assign a_o = ad[ch];
+ wire [15:0] rsel = a_i[0] ? tr[a_i[2:1]] : ad[a_i[2:1]];

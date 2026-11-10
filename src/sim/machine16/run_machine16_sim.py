@@ -60,6 +60,9 @@ TESTS = {
                             ('vv55_wr_no_cs', 'ERROR: vv55: cs: wr'), ('vv55_rd_no_cs', 'ERROR: vv55: cs: rd'),
                             ('vv55_byte_write_inte', 'ERROR: vv55: byte write inte'),
                             ('vv55_pc3_mixed', 'ERROR: vv55: pc3 mixed')]),
+    'vt57': dict(top='tb_vt57', files=['src/sim/machine16/tb_vt57.v', 'src/rtl/rk86_16/k580vt57.v'],
+                 negatives=[('vt57_extra_state', 'ERROR: vt57: aen'), ('vt57_s4_to_s1', 'ERROR: vt57: period 36'),
+                            ('vt57_address_early', 'ERROR: vt57: address'), ('vt57_one_edge', 'ERROR: vt57:')]),
 }  # the tasks that add testbenches add their entries
 
 

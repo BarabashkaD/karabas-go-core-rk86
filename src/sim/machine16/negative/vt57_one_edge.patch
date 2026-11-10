@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index cb411ee..6275c99 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -145,7 +145,7 @@ always @(posedge clk) begin
+             if (r_a[3]) tcs <= 4'd0; else ff <= !ff;
+         end
+         //---------------- θ↓: the states, DACK, AEN↑, IOR↑ / MEMR↑, the DRQ / HLDA / READY decisions
+-        if (th_dn) begin
++        if (th_up) begin
+             case (state)
+                 SI: if (p[2]) state <= S0;                                // DMA-16: pin-equivalent label
+                 S0: if (!p[2]) state <= SI;                               // SILENT: DMA-16
