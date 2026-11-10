@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index f600ba3..5788848 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -281,7 +281,7 @@ always @(posedge clk) begin
+             if (t_done) begin
+                 filled <= 1'b1; drq <= 1'b0; bleft <= 4'd0;
+                 if (stop_frame || (t_stop && w_d[1])) fstop <= 1'b1;
+-            end else if (t_bl == 4'd0) begin                                         // the end of a burst
++            end else if (1'b0) begin                                         // the end of a burst
+                 if (bsn == 6'd0) begin bleft <= bcn; drq <= 1'b1; end
+                 else begin bleft <= 4'd0; space <= bsn; end
+             end else begin

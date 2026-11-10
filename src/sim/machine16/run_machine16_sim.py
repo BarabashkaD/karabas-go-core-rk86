@@ -103,6 +103,30 @@ TESTS = {
                              'ERROR: vg75: preset: VRTC high while the counters are held, after a status read'),
                             ('vg75_ir_needs_ve',
                              'ERROR: vg75: ir: after 40h (Stop Display): 0 IRQ rises in a frame, expected 1')]),
+    'vg75_dma': dict(top='tb_vg75_dma', files=['src/sim/machine16/tb_vg75_dma.v', 'src/rtl/rk86_16/k580vg75.v'],
+                     negatives=[('vg75_burst_count_ignored',
+                                 'ERROR: vg75: burst length: BB = 00, SSS = 001: row 6 fill: burst 0 has 78 transfers, expected 1'
+                                 ' (CRT-21, [D79] 1-172, 1-179)'),
+                                ('vg75_burst_space_ignored',
+                                 'ERROR: vg75: burst space: BB = 00, SSS = 001: row 6 fill: DRQ 12 ce16 after the last WR rise of'
+                                 ' burst 0, expected 73..84 (CRT-21, [D79] 1-172, 1-179)'),
+                                ('vg75_drq_held',
+                                 'ERROR: vg75: drq at wr: row 2 fill transfer 0: DRQ high 2 clk after the DMA WR fall, expected'
+                                 ' low from WR fall + 2 clk to WR rise (CRT-22, [D79] 1-184 Fig. 30, D9)'),
+                                ('vg75_byte_on_wr_fall',
+                                 'ERROR: vg75: byte: row 0 line 0 char 0: CC 21, expected 20 (CRT-23, [D79] 1-185)'),
+                                ('vg75_underrun_ignored',
+                                 'ERROR: vg75: underrun: at the row 6 start: status bit 1 (DU) 0, expected 1'
+                                 ' (CRT-25, [D79] 1-172, 1-180, S11)'),
+                                ('vg75_underrun_restart_early',
+                                 'ERROR: vg75: underrun: 78 DRQ rises from the row 6 start to the VRTC fall, expected 0'
+                                 ' (DMA stopped until after the vertical retrace) (CRT-25, [D79] 1-172, 1-180, S11)'),
+                                ('vg75_fifo_off',
+                                 'ERROR: vg75: fifo: during row 1 (the row 2 fill): 78 transfers, expected 79'
+                                 ' (CRT-27, [D79] 1-165, 1-176)'),
+                                ('vg75_stop_dma_ignored',
+                                 'ERROR: vg75: stop dma: during row 4 (the row 5 fill): 78 transfers, expected 12'
+                                 ' (CRT-26, [D79] 1-175)')]),
 }  # the tasks that add testbenches add their entries
 
 

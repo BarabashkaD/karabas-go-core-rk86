@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index f600ba3..b7eab4e 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -269,7 +269,7 @@ always @(posedge clk) begin
+                 t_full = ipos > p_h;                                                 // SILENT S13
+             end else begin
+                 rbuf[{!dsel, ipos}] <= w_d; ipos <= ipos + 7'd1;
+-                t_tf = !p_f && w_d[7:6] == 2'b10;
++                t_tf = 1'b0;
+                 t_full = ipos == p_h;
+                 t_stop = w_d[7:2] == 6'b111100 && w_d[0];                            // F1, F3: Stop DMA
+             end
