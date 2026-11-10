@@ -168,9 +168,10 @@ reg fw_arm = 1'b0, fw_on = 1'b0, fw_done = 1'b0, fw_disp = 1'b0, fw_cnt = 1'b0, 
 integer fw_rmin = 0, fw_nfr = 1, fw_k = 0, fw_mode = 0, fw_nw = 0, fw_ninf = 0, n_cc = 0, n_vsp = 0, n_lt = 0, n_rv = 0;
 integer n_stray = 0, fw_xstray = 0;    // WR pulses with DACK and CS high seen in the frame; fills that drive one
 reg [8*24-1:0] t_cnt = "frame dma", t_disp = "frame dma";
-// underrun (check 6)
+// underrun (check 6): phase 1 from the row 6 start to the start of the last retrace row, phase 2 that row (the row 0
+// fill) to the VRTC fall; u_nb, u_be: the CCLK falls of phase 2 and its ublank errors
 reg u_arm = 1'b0, u_stop = 1'b0;
-integer u_phase = 0, u_drq = 0, u_nv = 0, u_ve = 0;
+integer u_phase = 0, u_drq = 0, u_nv = 0, u_ve = 0, u_nb = 0, u_be = 0;
 integer t_ref, row, line;
 reg [13:0] ex;
 task open_window(input integer r); begin
@@ -251,10 +252,21 @@ task close_window; begin
     end
     if (w_ba) ba_eval;
     if (w_c3) c3_n = c3_n + 1;
-    if (u_phase == 2 && w_row == 0) begin                 // the first DRQ after the underrun: the row 1 fill at the VRTC fall
+    // the first DMA after the underrun: the row 0 fill from the start of the last retrace row (VRTC rise), complete;
+    // the blanking until the VRTC fall (the row 0 start). Ruling 2026-11-11 (D11, spec 4.4): [D79] 1-180 "until after
+    // the vertical retrace interval" does not say whether the row 0 fill belongs to it; the board's picture is aligned
+    // after boot, so the fill runs as in every frame
+    if (u_phase == 2 && w_row == m_nr + m_nv - 1) begin
         if (w_drq1 < 0 || w_drq1 - w_t0 > cur_s * 12) begin
-            $sformat(msg, "underrun: the first DRQ %0d ce16 after the VRTC fall, expected 0..%0d (the row 1 fill)",
-                w_drq1 < 0 ? -1 : w_drq1 - w_t0, cur_s * 12);
+            $sformat(msg, "underrun: the first DRQ %0d ce16 after the row %0d start (the last retrace row), expected 0..%0d (the row 0 fill)",
+                w_drq1 < 0 ? -1 : w_drq1 - w_t0, w_row, cur_s * 12);
+            err(msg);
+        end else if (w_tr != w_e) begin
+            $sformat(msg, "underrun: the row 0 fill during row %0d: %0d transfers, expected %0d", w_row, w_tr, w_e); err(msg);
+        end
+        if (u_nb != m_nv * m_nl * (m_nh + 2 * (m_z + 1))) begin
+            $sformat(msg, "underrun: %0d CCLK falls checked from the row %0d start to the VRTC fall, expected %0d", u_nb, w_row,
+                m_nv * m_nl * (m_nh + 2 * (m_z + 1)));
             err(msg);
         end
         u_phase = 0;
@@ -300,18 +312,6 @@ task frame_edge; begin
         if (fw_k >= fw_nfr) begin fw_on = 1'b0; fw_done = 1'b1; end
         else begin fw_rmin = 0; fw_reset; fw_mode = img_mode; end
     end
-    if (u_phase == 1) begin                                // the end of the vertical retrace after the underrun
-        if (u_drq != 0) begin
-            $sformat(msg, "underrun: %0d DRQ rises from the row 6 start to the VRTC fall, expected 0 (DMA stopped until after the vertical retrace)", u_drq);
-            err(msg);
-        end
-        if (u_nv != (m_nr + m_nv - 6) * m_nl * (m_nh + 2 * (m_z + 1))) begin
-            $sformat(msg, "underrun: %0d CCLK falls checked from the row 6 start to the VRTC fall, expected %0d", u_nv,
-                (m_nr + m_nv - 6) * m_nl * (m_nh + 2 * (m_z + 1)));
-            err(msg);
-        end
-        u_phase = 2; fw_arm = 1'b1;
-    end
     if (fw_arm) begin fw_arm = 1'b0; fw_on = 1'b1; fw_k = 0; fw_reset; fw_mode = img_mode; end
 end endtask
 //---------------- the monitor and the DMA stand-in
@@ -350,6 +350,19 @@ always @(posedge clk) begin
         if (ri == m_nr - 1) img_mode = img_next;
         open_window(ri);
         if (ri == 6 && u_stop) begin u_stop = 1'b0; u_arm = 1'b0; u_phase = 1; u_drq = 0; u_nv = 0; u_ve = 0; end
+        if (u_phase == 1 && ri == m_nr + m_nv - 1) begin     // the start of the last retrace row after the underrun
+            if (u_drq != 0) begin
+                $sformat(msg, "underrun: %0d DRQ rises from the row 6 start to the row %0d start, expected 0 (DMA stopped until the last retrace row)",
+                    u_drq, ri);
+                err(msg);
+            end
+            if (u_nv != (m_nr - 6) * m_nl * (m_nh + 2 * (m_z + 1))) begin
+                $sformat(msg, "underrun: %0d CCLK falls checked from the row 6 start to the row %0d start, expected %0d", u_nv, ri,
+                    (m_nr - 6) * m_nl * (m_nh + 2 * (m_z + 1)));
+                err(msg);
+            end
+            u_phase = 2; u_nb = 0; u_be = 0; fw_arm = 1'b1;
+        end
     end
     // DRQ rises: the first of the window, after the last transfer, the burst boundaries
     if (dr_ev && w_open) begin
@@ -414,12 +427,24 @@ always @(posedge clk) begin
             end
         end
     end
-    // after the underrun: VSP high at every CCLK fall from the row 6 start to the VRTC fall
+    // after the underrun: VSP high at every CCLK fall from the row 6 start to the start of the last retrace row; in that
+    // row (VRTC: VSP high anyway, S5) the model's underrun blank (ublank) still high, to the VRTC fall (ruling 2026-11-11)
     if (u_phase == 1 && cclk_q) begin
         u_nv = u_nv + 1;
         if (vsp !== 1'b1 && u_ve < 4) begin
             u_ve = u_ve + 1;
-            $sformat(msg, "underrun: VSP low at line %0d char %0d, expected high from the row 6 start to the VRTC fall", tl, tc); err(msg);
+            $sformat(msg, "underrun: VSP low at line %0d char %0d, expected high from the row 6 start to the row %0d start", tl, tc,
+                m_nr + m_nv - 1);
+            err(msg);
+        end
+    end
+    if (u_phase == 2 && cclk_q) begin
+        u_nb = u_nb + 1;
+        if (dut.ublank !== 1'b1 && u_be < 4) begin
+            u_be = u_be + 1;
+            $sformat(msg, "underrun: the underrun blank low at line %0d char %0d, expected high from the row %0d start to the VRTC fall",
+                tl, tc, m_nr + m_nv - 1);
+            err(msg);
         end
     end
     hrtc_q = hrtc; vrtc_q = vrtc; drq_q = drq; dwr_q = dma_wr_n; cclk_q = cclk; di_q = d_i;
@@ -597,11 +622,12 @@ initial begin
     wait_n(LINE);
     stat_chk(8'h02, 8'h02, "underrun", "after the row 8 start (set at the row 6 start, no read since)");
     stat_chk(8'h00, 8'h02, "underrun", "the status read after DU");
-    // the next frame: rows 1-29 from the image (row 0 shows its buffer as left, S11); the frame after it: all rows
+    // the next two frames: every row from the image, row 0 too (its fill in the last retrace row of the underrun frame;
+    // ruling 2026-11-11, D11, spec 4.4)
     t_cnt = "underrun"; t_disp = "underrun"; fw_disp = 1'b1; fw_cnt = 1'b1; fw_first = 1'b0; fw_inf = 1'b0;
-    fw_rmin = 1; fw_nfr = 2; fw_done = 1'b0;
+    fw_rmin = 0; fw_nfr = 2; fw_done = 1'b0;
     `WAIT_UNTIL(fw_done, 4 * FRAME, "underrun: the two frames after the VRTC fall")
-    if (u_phase != 0) err("underrun: the first DRQ after the VRTC fall not checked");
+    if (u_phase != 0) err("underrun: the row 0 fill after the underrun not checked");
     fw_nfr = 1;
     //---------------- 7. CRT-26 special codes
     ids = "CRT-26, [D79] 1-175";

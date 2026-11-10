@@ -1,8 +1,8 @@
 diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
-index f600ba3..fa80d85 100644
+index 200888d..619761e 100644
 --- a/src/rtl/rk86_16/k580vg75.v
 +++ b/src/rtl/rk86_16/k580vg75.v
-@@ -157,8 +157,8 @@ task row_start(input [6:0] rn);
+@@ -158,8 +158,8 @@ task row_start(input [6:0] rn);
      begin
          vrtc <= rn > r_last;
          if (rn == r_last + 7'd1) begin                 // VRTC rises: field attributes and End of Screen reset
@@ -10,6 +10,6 @@ index f600ba3..fa80d85 100644
 -        end else fa_row <= fa;
 +            frame <= frame + 6'd1; eos <= 1'b0;
 +        end fa_row <= fa;
-         if (rn == 7'd0) begin ublank <= 1'b0; ustop <= 1'b0; end   // after the vertical retrace (S11)
+         if (rn == row_last) ustop <= 1'b0;             // S11 (decided 2026-11-11, D11): the row 0 fill runs
+         if (rn == 7'd0) ublank <= 1'b0;                // the display of the new frame
          t_ur = text_row(rn) && fill && !filled;        // SILENT S11: the moment of the underrun check
-         if (t_ur) begin du <= 1'b1; ustop <= 1'b1; ublank <= 1'b1; end

@@ -674,7 +674,9 @@ initial begin
     wr(1'b1, 8'h80); wr(1'b0, 8'h00); wr(1'b0, 8'h00);
     resume_chk("preset", 1'b1);
     //---------------- 12b. Preset Counters with an underrun pending (C1, decided 2026-11-10: the preset clears the
-    // underrun's DMA stop, its first DMA is the row 0 fill; the board's tape I/O leaves an underrun, then 27h, E0h)
+    // underrun's DMA stop, its first DMA is the row 0 fill; the board's tape I/O leaves an underrun, then 27h, E0h).
+    // Since the ruling of 2026-11-11 (D11, spec 4.4) every underrun's DMA stop ends at the start of the last retrace
+    // row, so the resume (that row start) ends it too
     ids = "CRT-12, [D79] 1-179, 1-180, S11, S12";
     wait_ev(E_VF, 2 * FRAME, "preset: VRTC fall", t0);
     dma_off = 1'b1;                                     // the stand-in stops answering: the row 1 fill stalls

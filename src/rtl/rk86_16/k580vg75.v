@@ -28,8 +28,9 @@
 //   - special codes F0-F3 with and without Stop DMA; field attributes 10URGGBH (transparent with the
 //     FIFOs, non-transparent); character attributes 11CCCCBH (LA, VSP, LTEN table); the four cursor
 //     formats; blinking; spaced rows; top / bottom blanking for UUUU >= 8; light pen registers
-//   - underrun from the buffer count (not from DRQ): DU; DMA stopped and the screen blanked until after
-//     the vertical retrace interval ([D79] 1-180)
+//   - underrun from the buffer count (not from DRQ): DU; the screen blanked until the row 0 start, the DMA stopped
+//     until the start of the last retrace row, whose row 0 fill runs as in every frame ([D79] 1-180 "until after the
+//     vertical retrace interval"; S11 decided 2026-11-11 by D11, spec 4.4: the board's picture is aligned after boot)
 //   - the power-up state = the state after the Reset command (display, interrupts and DMA off, flags 0,
 //     VSP high; parameters, counters and cursor 0); the plain 8275, not the 8275-2; SILENT items marked
 `default_nettype none
@@ -159,18 +160,19 @@ task row_start(input [6:0] rn);
         if (rn == r_last + 7'd1) begin                 // VRTC rises: field attributes and End of Screen reset
             frame <= frame + 6'd1; eos <= 1'b0; fa <= 6'd0; fa_row <= 6'd0;
         end else fa_row <= fa;
-        if (rn == 7'd0) begin ublank <= 1'b0; ustop <= 1'b0; end   // after the vertical retrace (S11)
+        if (rn == row_last) ustop <= 1'b0;             // S11 (decided 2026-11-11, D11): the row 0 fill runs
+        if (rn == 7'd0) ublank <= 1'b0;                // the display of the new frame
         t_ur = text_row(rn) && fill && !filled;        // SILENT S11: the moment of the underrun check
         if (t_ur) begin du <= 1'b1; ustop <= 1'b1; ublank <= 1'b1; end
         if (text_row(rn)) dsel <= !dsel;
-        if ((rn == row_last || text_row(rn + 7'd1)) && dmae && !t_ur && (!ustop || rn == 7'd0)
+        if ((rn == row_last || text_row(rn + 7'd1)) && dmae && !t_ur && (!ustop || rn == row_last)
             && (rn == row_last || !fstop)) begin
             fill <= 1'b1; filled <= 1'b0; ipos <= 7'd0; iw <= 4'd0; icount <= 5'd0; to_fifo <= 1'b0;
             stop_next <= 1'b0; stop_frame <= 1'b0; bleft <= bcn; space <= 6'd0; drq <= 1'b1;
         end else begin
             fill <= 1'b0; drq <= 1'b0; space <= 6'd0;
         end
-        if (rn == row_last) fstop <= 1'b0;             // the first DMA of the frame (not after an underrun)
+        if (rn == row_last) fstop <= 1'b0;             // the first DMA of the frame (after an underrun too)
     end
 endtask
 
@@ -193,8 +195,8 @@ always @(posedge clk) begin
             ch <= line_last; ln <= 4'd0; rw <= row_last;
             hrtc <= 1'b0; vrtc <= 1'b0; vsp <= 1'b1; lten <= 1'b0; rvv <= 1'b0; hglt <= 1'b0; la <= 2'b00; gpa <= 2'b00;
             drq <= 1'b0; fill <= 1'b0; space <= 6'd0; bleft <= 4'd0; eor <= 1'b0; fr <= 4'd0;
-            ustop <= 1'b0;                      // S12 / S11 (decided): the preset starts a new frame cycle, its first
-                                                // DMA is the row 0 fill; ublank stays until the row 0 start
+            // S12 / S11 (decided): an underrun's DMA stop ends at the resume (row_start of the last retrace row),
+            // its first DMA is the row 0 fill; ublank stays until the row 0 start
         end else if (!hold) begin
             if (rel) begin                      // the resume: the row start of the last retrace row (VRTC↑,
                 rel <= 1'b0;                    // the row 0 fill) with the actions of a VRTC rise

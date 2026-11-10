@@ -1,18 +1,19 @@
 diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
-index f600ba3..3915057 100644
+index 200888d..328823f 100644
 --- a/src/rtl/rk86_16/k580vg75.v
 +++ b/src/rtl/rk86_16/k580vg75.v
-@@ -159,11 +159,11 @@ task row_start(input [6:0] rn);
+@@ -160,12 +160,11 @@ task row_start(input [6:0] rn);
          if (rn == r_last + 7'd1) begin                 // VRTC rises: field attributes and End of Screen reset
              frame <= frame + 6'd1; eos <= 1'b0; fa <= 6'd0; fa_row <= 6'd0;
          end else fa_row <= fa;
--        if (rn == 7'd0) begin ublank <= 1'b0; ustop <= 1'b0; end   // after the vertical retrace (S11)
-+        if (rn == 7'd0) ublank <= 1'b0; if (rn == row_last) ustop <= 1'b0;   // after the vertical retrace (S11)
+-        if (rn == row_last) ustop <= 1'b0;             // S11 (decided 2026-11-11, D11): the row 0 fill runs
+-        if (rn == 7'd0) ublank <= 1'b0;                // the display of the new frame
++        if (rn == 7'd0) begin ublank <= 1'b0; ustop <= 1'b0; end   // after the vertical retrace (S11)
          t_ur = text_row(rn) && fill && !filled;        // SILENT S11: the moment of the underrun check
          if (t_ur) begin du <= 1'b1; ustop <= 1'b1; ublank <= 1'b1; end
          if (text_row(rn)) dsel <= !dsel;
--        if ((rn == row_last || text_row(rn + 7'd1)) && dmae && !t_ur && (!ustop || rn == 7'd0)
-+        if ((rn == row_last || text_row(rn + 7'd1)) && dmae && !t_ur && (!ustop || rn == row_last)
+-        if ((rn == row_last || text_row(rn + 7'd1)) && dmae && !t_ur && (!ustop || rn == row_last)
++        if ((rn == row_last || text_row(rn + 7'd1)) && dmae && !t_ur && (!ustop || rn == 7'd0)
              && (rn == row_last || !fstop)) begin
              fill <= 1'b1; filled <= 1'b0; ipos <= 7'd0; iw <= 4'd0; icount <= 5'd0; to_fifo <= 1'b0;
              stop_next <= 1'b0; stop_frame <= 1'b0; bleft <= bcn; space <= 6'd0; drq <= 1'b1;

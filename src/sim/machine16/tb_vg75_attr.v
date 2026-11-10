@@ -235,8 +235,8 @@ function integer kind_of(input integer m, input integer r, input integer ln, inp
     end
 endfunction
 integer tfr = 0;                 // VRTC rises since power-up: the frame counter of the plan (S3, S17)
-integer fw_mode = IM_PLAIN, fw_ur = -1;
-reg fw_r0x = 1'b0;               // row 0 not checked: the frame after an underrun shows the buffer as left (S11)
+integer fw_mode = IM_PLAIN, fw_ur = -1;   // fw_ur: the underrun row; the next frame is checked in full, row 0 too (its
+                                          // fill in the last retrace row; ruling 2026-11-11, D11, spec 4.4)
 reg [7:0] e_m;                   // checked outputs: 7 CC, 6 LC, 5 LA, 4 VSP, 3 LTEN, 2 RVV, 1 HGLT, 0 GPA
 reg [6:0] e_cc;
 reg [3:0] e_lc;
@@ -285,7 +285,6 @@ task ref_out(input integer m, input integer r, input integer ln, input integer p
             else begin e_la = 2'b00; e_l = 1'b0; e_r = 1'b0; e_h = 1'b0; e_g = 2'b00; end
         end
         if (!t_ve || (fw_ur >= 0 && r >= fw_ur)) begin e_v = 1'b1; e_m = 8'b0001_0000; end   // VE = 0, underrun (S6)
-        if (fw_r0x && r == 0) e_m = 8'h00;
     end
 endtask
 //---------------- the frame windows: armed by the TB, on from the next VRTC fall for fw_nfr frames
@@ -419,7 +418,7 @@ task frame_edge; begin
             end
         end
     end
-    fw_r0x = fw_ur >= 0; fw_ur = -1;
+    fw_ur = -1;
     if (fw_arm) begin fw_arm = 1'b0; fw_on = 1'b1; fw_k = 0; end
     if (fw_on) begin
         fw_mode = img_mode; n_ret = 0; n_erv = 0; n_erl = 0;

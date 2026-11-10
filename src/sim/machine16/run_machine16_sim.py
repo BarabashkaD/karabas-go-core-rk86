@@ -110,7 +110,10 @@ TESTS = {
                              'ERROR: vg75: preset: VRTC not high after the first CCLK fall after the releasing command'),
                             ('vg75_lc_mode', 'ERROR: vg75: lc: row 0 line 0 char 0: LC 0, expected 9 (M = 1)'),
                             ('vg75_lpen_no_flag', 'ERROR: vg75: light pen: after LPEN rise: status bit 4 (LP) 0, expected 1'),
-                            ('vg75_preset_keeps_ustop',
+                            # the DMA stop of an underrun held through the whole vertical retrace (the ruling before
+                            # 2026-11-11): the resume after E0h no longer ends it (it replaces vg75_preset_keeps_ustop,
+                            # the same behaviour now that the preset needs no clear of its own)
+                            ('vg75_underrun_restart_late',
                              'ERROR: vg75: preset after an underrun: the first DRQ 10224 ce16 after the resume CCLK fall'),
                             ('vg75_preset_release_write',
                              'ERROR: vg75: preset: VRTC high while the counters are held, after a parameter write'),
@@ -132,10 +135,12 @@ TESTS = {
                                  'ERROR: vg75: byte: row 0 line 0 char 0: CC 21, expected 20 (CRT-23, [D79] 1-185)'),
                                 ('vg75_underrun_ignored',
                                  'ERROR: vg75: underrun: VSP low at line 61 char 0, expected high from the row 6 start to the'
-                                 ' VRTC fall (CRT-25, [D79] 1-172, 1-180, S11)'),
-                                ('vg75_underrun_restart_early',
-                                 'ERROR: vg75: underrun: 78 DRQ rises from the row 6 start to the VRTC fall, expected 0'
-                                 ' (DMA stopped until after the vertical retrace) (CRT-25, [D79] 1-172, 1-180, S11)'),
+                                 ' row 30 start (CRT-25, [D79] 1-172, 1-180, S11)'),
+                                # the ruling of 2026-11-11 (D11, spec 4.4): after an underrun the row 0 fill runs in
+                                # the last retrace row; the fault keeps the DMA stopped through it (the old reading)
+                                ('vg75_underrun_restart_late',
+                                 'ERROR: vg75: underrun: the first DRQ -1 ce16 after the row 30 start (the last retrace row),'
+                                 ' expected 0..84 (the row 0 fill) (CRT-25, [D79] 1-172, 1-180, S11)'),
                                 ('vg75_fifo_off',
                                  'ERROR: vg75: fifo: during row 1 (the row 2 fill): 78 transfers, expected 79'
                                  ' (CRT-27, [D79] 1-165, 1-176)'),
@@ -166,7 +171,11 @@ TESTS = {
                                   ' expected 1 (frame 16) (CRT-36, [D79] 1-173, 1-175, S3)'),
                                  ('vg75_ca_underline_field',
                                   'ERROR: vg75: interaction: UUUU = 9: row 1 line 0 char 11 (code e4): HGLT 1, expected 0'
-                                  ' (frame 156) (CRT-32, [D79] 1-176)')]),
+                                  ' (frame 156) (CRT-32, [D79] 1-176)'),
+                                 # the frame after the underrun: row 0 without its fill shows the stalled row 2 bytes
+                                 ('vg75_underrun_restart_late',
+                                  'ERROR: vg75: cc: an underrun in the row 2 fill: row 0 line 0 char 0 (code 63): CC 29,'
+                                  ' expected 63')]),
     'video16': dict(top='tb_video16', files=['src/sim/machine16/tb_video16.v', 'src/rtl/rk86_16/rk86_video16.v'],
                     negatives=[('video_load_at_0', 'ERROR: video16: dot'), ('video_shift_order', 'ERROR: video16: dot'),
                                ('video_lten_unlatched', 'ERROR: video16: lten'), ('video_vsp_ignored', 'ERROR: video16: vsp')]),
@@ -188,7 +197,10 @@ TESTS = {
                                  # high after θ↑ of S4); Task 14's DMA cost check caught it alone before the rebase
                                  # (Task 14 report)
                                  ('vt57_extra_state', 'ERROR: hold periods'),
-                                 ('vt57_s4_to_s1', 'ERROR: hold periods'), ('mem16_dropped_after_rd', 'ERROR: dma byte')]),
+                                 ('vt57_s4_to_s1', 'ERROR: hold periods'), ('mem16_dropped_after_rd', 'ERROR: dma byte'),
+                                 # the boot underrun with the DMA stopped through the whole vertical retrace: no row 0
+                                 # fill, the 8257 block one row out of step with the frame (review finding 2026-11-11)
+                                 ('vg75_underrun_restart_late', 'ERROR: dma byte: frame ')]),
 }  # the tasks that add testbenches add their entries
 
 
