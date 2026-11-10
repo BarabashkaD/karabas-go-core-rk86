@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vv55.v b/src/rtl/rk86_16/k580vv55.v
+index ac555b5..a077d47 100644
+--- a/src/rtl/rk86_16/k580vv55.v
++++ b/src/rtl/rk86_16/k580vv55.v
+@@ -68,7 +68,7 @@ always @(*) begin
+         ctl[2:0] = 3'b111; ctl_out[1:0] = 2'b11; ctl_val[0] = intrb; ctl_val[1] = b_in ? ibfb : obfb_n;
+     end
+ end
+-wire [7:0] io_out = {{4{!cu_in}}, {4{!cl_in}}};    // PPI-24: by the group's direction bit (PC3: bit 0)
++wire [7:0] io_out = {{4{!cu_in}}, (a_m0 && b_m1) ? !cu_in : !cl_in, {3{!cl_in}}};    // PPI-24: by the group's direction bit (PC3: bit 0)
+ wire [7:0] pc_wmask = ~ctl & io_out;               // PPI-29: the bits a port C byte write changes
+ assign pc_oe = ctl_out | (~ctl & io_out);
+ assign pc_o = (ctl_out & ctl_val) | (~ctl & lc);

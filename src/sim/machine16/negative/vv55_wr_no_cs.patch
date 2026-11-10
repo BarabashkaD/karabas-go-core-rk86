@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vv55.v b/src/rtl/rk86_16/k580vv55.v
+index ac555b5..4153a16 100644
+--- a/src/rtl/rk86_16/k580vv55.v
++++ b/src/rtl/rk86_16/k580vv55.v
+@@ -99,7 +99,7 @@ always @(*) begin
+ end
+ always @(posedge clk) begin
+     wr_q <= wr_n;
+-    if (!wr_n) begin wcs <= !cs_n; wa <= a; wd <= d_i; end
++    if (!wr_n) begin wcs <= 1'b1; wa <= a; wd <= d_i; end
+     rda_q <= rd_a; rdb_q <= rd_b;
+     if (reset) begin
+         mode <= 7'b0011011; la <= 8'h00; lb <= 8'h00; lc <= 8'h00;

@@ -35,6 +35,26 @@ task rd(input [1:0] ad, output [7:0] dd); begin
     @(negedge clk) cs_n = 1'b1;
     repeat (2) @(negedge clk);
 end endtask
+// a WR / RD pulse with CS high ([C78] 12-77: CS = 1 is no operation)
+task wr_nocs(input [1:0] ad, input [7:0] dd); begin
+    @(negedge clk) begin a = ad; d = dd; end
+    @(negedge clk) wr_n = 1'b0;
+    repeat (4) @(negedge clk); wr_n = 1'b1;
+    repeat (3) @(negedge clk);
+end endtask
+task rd_nocs(input [1:0] ad); begin
+    @(negedge clk) a = ad;
+    @(negedge clk) rd_n = 1'b0;
+    repeat (2) @(negedge clk); mid_pc = pc_o;
+    repeat (2) @(negedge clk); rd_n = 1'b1;
+    repeat (3) @(negedge clk);
+end endtask
+// a strobe (STB / ACK) of 4 clk on the port C pin `b`
+task strobe(input [2:0] b); begin
+    @(negedge clk) pc_i[b] = 1'b0;
+    repeat (4) @(negedge clk); pc_i[b] = 1'b1;
+    repeat (2) @(negedge clk);
+end endtask
 initial begin
     repeat (4) @(negedge clk); reset = 1'b0; repeat (2) @(negedge clk);
     // PPI-1 reset: every port an input ([C78] 12-78 RESET)
@@ -95,14 +115,22 @@ initial begin
     pc_i = 8'hFF; wr(2'd3, 8'h86); wr(2'd3, 8'h05);
     pb_i = 8'h66; @(negedge clk) pc_i[2] = 1'b0; repeat (3) @(negedge clk); pc_i[2] = 1'b1; repeat (2) @(negedge clk);
     chk(pc_o[1] == 1'b1 && pc_o[0] == 1'b1, "mode 1 input: port B ibf / intr");
+    // status read first (Fig. 15: D2 INTE B, D1 IBF B, D0 INTR B); only the port B read clears IBF B (PPI-31)
+    rd(2'd2, v); chk(v[2:0] == 3'b111 && pc_o[1] == 1'b1, "mode 1 input: port B status word");
+    rd(2'd0, v); chk(pc_o[1] == 1'b1 && pc_o[0] == 1'b1, "mode 1 input: port B ibf kept by other reads");
     wbit = 3'd0; arm = 1'b1; rd(2'd1, v); chk(v == 8'h66 && pc_o[1] == 1'b0, "mode 1 input: port B");
     endw("intr pulse after rd: mode 1 port B input");
     wr(2'd3, 8'h84); wr(2'd3, 8'h05); chk(pc_o[0] == 1'b1, "mode 1 output: port B intr with empty buffer");
+    // only a port B write sets OBF B (PPI-31)
+    wr(2'd0, 8'h11); wr(2'd2, 8'h00);
+    chk(pc_o[1] == 1'b1 && pc_o[0] == 1'b1, "mode 1 output: port B obf kept by other writes");
     wbit = 3'd0; arm = 1'b1; wr(2'd1, 8'h99);
     chk(pb_oe && pb_o == 8'h99 && pc_o[1] == 1'b0, "mode 1 output: port B obf");
     endw("intr pulse after wr: mode 1 port B output");
+    rd(2'd2, v); chk(v[2:0] == 3'b100, "mode 1 output: port B status after wr");
     @(negedge clk) pc_i[2] = 1'b0; repeat (3) @(negedge clk); pc_i[2] = 1'b1; repeat (2) @(negedge clk);
     chk(pc_o[1] == 1'b1 && pc_o[0] == 1'b1, "mode 1 output: port B ack");
+    rd(2'd2, v); chk(v[2:0] == 3'b111, "mode 1 output: port B status after ack");
     // PPI-8 mode 2: port A bidirectional, its buffer enabled by ACK; IBF PC5, STB PC4, OBF PC7, ACK PC6,
     // INTR PC3; INTE 1 by PC6, INTE 2 by PC4 ([C78] 12-86, 12-87)
     pc_i = 8'hFF; wr(2'd3, 8'hC0);
@@ -128,6 +156,68 @@ initial begin
     pc_i[4] = 1'b1; @(posedge clk) chk(pc_o[3] == 1'b1, "mode 2: intr at stb end");
     wbit = 3'd3; arm = 1'b1; rd(2'd0, v); chk(v == 8'h24 && pc_o[3] == 1'b0 && mid_pc[3] == 1'b0, "mode 2: intr after rd");
     endw("intr pulse after rd: mode 2");
+    // PPI-3 a mode-set write clears the status flip-flops and INTE ([C78] 12-79, 12-80): IBF A / B
+    // (B6h: A and B mode 1 input), OBF A / B (A4h: A and B mode 1 output)
+    pc_i = 8'hFF; wr(2'd3, 8'hB6); wr(2'd3, 8'h09); wr(2'd3, 8'h05);
+    pa_i = 8'h11; pb_i = 8'h22; @(negedge clk) begin pc_i[4] = 1'b0; pc_i[2] = 1'b0; end
+    repeat (4) @(negedge clk); pc_i[4] = 1'b1; pc_i[2] = 1'b1; repeat (2) @(negedge clk);
+    chk(pc_o[5] && pc_o[3] && pc_o[1] && pc_o[0], "mode set: status setup (ibf a / b)");
+    wr(2'd3, 8'hB6);
+    chk(pc_o[5] == 1'b0 && pc_o[1] == 1'b0 && pc_o[3] == 1'b0 && pc_o[0] == 1'b0, "mode set: status ibf not cleared");
+    rd(2'd2, v); chk(v[5:0] == 6'b000000, "mode set: status word (input)");
+    wr(2'd3, 8'hA4); wr(2'd0, 8'h12); wr(2'd1, 8'h34);
+    chk(pc_o[7] == 1'b0 && pc_o[1] == 1'b0, "mode set: status setup (obf a / b)");
+    wr(2'd3, 8'hA4);
+    chk(pc_o[7] == 1'b1 && pc_o[1] == 1'b1, "mode set: status obf not cleared");
+    rd(2'd2, v); chk(v[7] && !v[6] && !v[2] && v[1], "mode set: status word (output)");
+    // PPI-9, PPI-31 RD and WR act only with CS low ([C78] 12-77): A mode 1 output with INTE A, then input
+    wr(2'd3, 8'hA0); wr(2'd3, 8'h0D);
+    wr_nocs(2'd0, 8'h5A);
+    chk(pa_o == 8'h00 && pc_o[7] == 1'b1 && pc_o[3] == 1'b1, "cs: wr without cs");
+    wr(2'd3, 8'hB0); wr(2'd3, 8'h09);
+    pa_i = 8'h5C; strobe(3'd4); pa_i = 8'h00;
+    chk(pc_o[5] == 1'b1 && pc_o[3] == 1'b1, "cs: rd setup (ibf)");
+    rd_nocs(2'd0);
+    chk(pc_o[5] == 1'b1 && pc_o[3] == 1'b1 && mid_pc[3] == 1'b1, "cs: rd without cs");
+    rd(2'd0, v); chk(v == 8'h5C && pc_o[5] == 1'b0, "cs: rd with cs");
+    // PPI-32 (SILENT, accepted): the input latch follows the port while STB is low; a second STB overwrites
+    pa_i = 8'h11; @(negedge clk) pc_i[4] = 1'b0; repeat (2) @(negedge clk); pa_i = 8'h22; repeat (2) @(negedge clk);
+    pc_i[4] = 1'b1; pa_i = 8'h00; repeat (2) @(negedge clk);
+    rd(2'd0, v); chk(v == 8'h22, "input latch: transparent while stb low");
+    pa_i = 8'h44; strobe(3'd4); pa_i = 8'h55; strobe(3'd4); pa_i = 8'h00;
+    rd(2'd0, v); chk(v == 8'h55, "input latch: second stb overwrites");
+    // PPI-29 a port C byte write leaves INTE (ruling): B0h, INTE A = 1, data C7h with bit 4 = 0, then 10h
+    wr(2'd3, 8'hB0); wr(2'd3, 8'h09);
+    // outputs PC7, PC6, PC2-PC0; PC5 IBF = 0, PC4 STB (input), PC3 INTR = 0
+    wr(2'd2, 8'hC7); chk(pc_o == 8'hC7, "byte write inte: pattern C7h");
+    rd(2'd2, v); chk(v[4] == 1'b1, "byte write inte: inte cleared by C7h");
+    wr(2'd2, 8'h10); chk(pc_o == 8'h00, "byte write inte: pattern 10h");
+    rd(2'd2, v); chk(v[4] == 1'b1, "byte write inte: inte changed by 10h");
+    // PPI-24, PPI-29 group A mode 0 with group B mode 1 (ruling): PC3 by D0, PC7-PC4 by D3
+    wr(2'd3, 8'h8E); chk(pc_oe == 8'h0B, "pc3 mixed: 8Eh pins");
+    wr(2'd2, 8'hFF); chk(pc_o[7:3] == 5'b00001, "pc3 mixed: 8Eh byte write");
+    wr(2'd3, 8'h8C); chk(pc_oe == 8'h0B, "pc3 mixed: 8Ch pins");
+    wr(2'd2, 8'hFF); chk(pc_o[7:3] == 5'b00001, "pc3 mixed: 8Ch byte write");
+    wr(2'd3, 8'h87); chk(pc_oe == 8'hF3, "pc3 mixed: 87h pins");
+    wr(2'd2, 8'hFF); chk(pc_o[7:3] == 5'b11110, "pc3 mixed: 87h byte write");
+    // PPI-22 (SILENT, accepted): a control register read gives FFh
+    rd(2'd3, v); chk(v == 8'hFF, "control register read");
+    // PPI-25 mixed groups (B4h: A mode 1 input, B mode 1 output): D7-D3 of the input word, D2-D0 of the
+    // output word
+    wr(2'd3, 8'hB4); wr(2'd3, 8'h09); wr(2'd3, 8'h05);
+    pa_i = 8'h0F; strobe(3'd4); pa_i = 8'h00;
+    rd(2'd2, v); chk(v == 8'h3F, "status word: a input, b output empty");
+    wr(2'd1, 8'h66);
+    rd(2'd2, v); chk(v == 8'h3C, "status word: a input, b output full");
+    // PPI-26 mode 2 with group B mode 1 input (C6h): PC7-PC3 group A, PC2-PC0 the group B handshake;
+    // D2 is INTE B, not the STB B pin (high)
+    wr(2'd3, 8'hC6); chk(pc_oe == 8'hAB && !pa_oe && !pb_oe, "mode 2 + b mode 1: pins");
+    pb_i = 8'h5B; strobe(3'd2); pb_i = 8'h00;
+    chk(pc_o[1] == 1'b1 && pc_o[0] == 1'b0 && pc_o[3] == 1'b0, "mode 2 + b mode 1: ibf b");
+    rd(2'd2, v); chk(v == 8'h82, "mode 2 + b mode 1: status word, inte b 0");
+    wr(2'd3, 8'h05); chk(pc_o[0] == 1'b1 && pc_o[3] == 1'b0, "mode 2 + b mode 1: intr b");
+    rd(2'd2, v); chk(v == 8'h87, "mode 2 + b mode 1: status word");
+    rd(2'd1, v); chk(v == 8'h5B && pc_o[1] == 1'b0, "mode 2 + b mode 1: port B");
     // PPI-10 the RK86 control words: 8Ah keyboard (A out, B in, C upper in, C lower out); 90h ROM disk
     wr(2'd3, 8'h8A); chk(pa_oe && !pb_oe && pc_oe == 8'h0F, "rk86 word 8Ah");
     wr(2'd3, 8'h90); chk(!pa_oe && pb_oe && pc_oe == 8'hFF, "rk86 word 90h");

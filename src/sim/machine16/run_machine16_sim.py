@@ -55,7 +55,11 @@ TESTS = {
                             ('vv55_obf_ack_ignored', 'ERROR: vv55: mode 1 output'),
                             ('vv55_mode2_buffer', 'ERROR: vv55: mode 2'),
                             ('vv55_pc_upper_mode0_only', 'ERROR: vv55: port C byte write'),
-                            ('vv55_intr_pulse', 'ERROR: vv55: intr pulse')]),
+                            ('vv55_intr_pulse', 'ERROR: vv55: intr pulse'),
+                            ('vv55_mode_set_keeps_status', 'ERROR: vv55: mode set: status'),
+                            ('vv55_wr_no_cs', 'ERROR: vv55: cs: wr'), ('vv55_rd_no_cs', 'ERROR: vv55: cs: rd'),
+                            ('vv55_byte_write_inte', 'ERROR: vv55: byte write inte'),
+                            ('vv55_pc3_mixed', 'ERROR: vv55: pc3 mixed')]),
 }  # the tasks that add testbenches add their entries
 
 

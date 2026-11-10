@@ -1,0 +1,12 @@
+diff --git a/src/rtl/rk86_16/k580vv55.v b/src/rtl/rk86_16/k580vv55.v
+index ac555b5..a9faae6 100644
+--- a/src/rtl/rk86_16/k580vv55.v
++++ b/src/rtl/rk86_16/k580vv55.v
+@@ -123,7 +123,6 @@ always @(posedge clk) begin
+                     if (wd[7]) begin                                                  // PPI-3, D14: every write
+                         mode <= wd[6:0];
+                         la <= 8'h00; lb <= 8'h00; lc <= 8'h00;
+-                        ibfa <= 1'b0; ibfb <= 1'b0; obfa_n <= 1'b1; obfb_n <= 1'b1;
+                         intea1 <= 1'b0; intea2 <= 1'b0; inteb <= 1'b0;
+                     end else begin
+                         lc[wd[3:1]] <= wd[0];                                         // SILENT: handshake bits
