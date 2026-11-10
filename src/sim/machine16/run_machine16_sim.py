@@ -160,7 +160,14 @@ TESTS = {
                       files=lambda: ['src/sim/machine16/cpu_power_up.vh', 'src/sim/machine16/tb_rk86_machine16.v', MEM]
                       + prj_files('src/rk86_machine16.prj'),
                       hexfiles=dict(bios='src/roms/BIOS.BIN', font='src/roms/FONT.BIN'),
-                      negatives=[('crt_wr_without_ior', 'ERROR: glue: 8275 WR')]),
+                      negatives=[('crt_wr_without_ior', 'ERROR: glue: 8275 WR'),
+                                 # the 8257 on the character clock: the glue check of its CLK pin is the first
+                                 # ERROR (from the first clk); the bus timing checks alone give 'aen per transfer'
+                                 ('dma_on_char_clock', 'ERROR: glue: 8257 CLK: not 8224 F2'),
+                                 ('vg75_drq_held', 'ERROR: hold periods'),
+                                 ('vg75_burst_count_ignored', 'ERROR: burst length'),
+                                 ('vg75_burst_space_ignored', 'ERROR: burst space'),
+                                 ('vg75_hrtc_7', 'ERROR: hrtc')]),
 }  # the tasks that add testbenches add their entries
 
 

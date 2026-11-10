@@ -1,0 +1,25 @@
+diff --git a/src/rtl/rk86_16/rk86_machine16.v b/src/rtl/rk86_16/rk86_machine16.v
+index a4353f2..e9f5dce 100644
+--- a/src/rtl/rk86_16/rk86_machine16.v
++++ b/src/rtl/rk86_16/rk86_machine16.v
+@@ -37,9 +37,10 @@ module rk86_machine16 #(parameter [3:0] LOAD_STATE = 4'd10) (
+ //---------------- 8224 and ИЕ4
+ wire f1, f2, f2_fall, sys_reset, ready, cpu_sync, dot_ce, cclk_fall;
+ wire [3:0] cnt12;
++wire cclk_rise_w;
+ rk86_clocks16 clocks(.clk(clk), .ce16(ce16), .resin_n(~reset), .rdyin(1'b1), .sync(cpu_sync),
+     .f1(f1), .f2(f2), .f2_fall(f2_fall), .phi1(), .phi2(), .reset(sys_reset), .ready(ready), .ststb_n(),
+-    .ie4(), .cnt12(cnt12), .dot_ce(dot_ce), .cclk_fall(cclk_fall), .cclk_rise());
++    .ie4(), .cnt12(cnt12), .dot_ce(dot_ce), .cclk_fall(cclk_fall), .cclk_rise(cclk_rise_w));
+ //---------------- 8080
+ wire [15:0] dma_a;
+ wire [7:0] crt_o, ppa_o;
+@@ -61,7 +62,7 @@ assign mem_rd = !rd_line_n;
+ //---------------- 8257
+ wire [3:0] dack_n;
+ wire crt_drq;
+-k580vt57 dma(.clk(clk), .th_up(f2), .th_dn(f2_fall), .reset(sys_reset),
++k580vt57 dma(.clk(clk), .th_up(cclk_rise_w), .th_dn(cclk_fall), .reset(sys_reset),
+     .cs_n(~sel_top), .ior_n_i(1'b1), .iow_n_i(cpu_wr_n), .a_i(bus_a[3:0]), .d_i(cpu_do), .d_o(),
+     .drq({1'b0, crt_drq, 2'b00}), .hlda(hlda), .ready(ready), .hrq(hold), .dack_n(dack_n), .a_o(dma_a),
+     .aen(aen), .adstb(), .memr_n(), .memw_n(memw_n), .ior_n_o(ior_n), .iow_n_o(), .tc(), .mark());
