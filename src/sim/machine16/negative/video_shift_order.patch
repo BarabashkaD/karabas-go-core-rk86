@@ -1,0 +1,14 @@
+diff --git a/src/rtl/rk86_16/rk86_video16.v b/src/rtl/rk86_16/rk86_video16.v
+index 6b44ec9..0f90ecc 100644
+--- a/src/rtl/rk86_16/rk86_video16.v
++++ b/src/rtl/rk86_16/rk86_video16.v
+@@ -26,7 +26,7 @@ always @(posedge clk)
+     if (load) begin
+         sh <= vsp ? 6'd0 : font_data[5:0];
+         lt <= lten;
+-    end else if (dot_ce) sh <= {sh[4:0], 1'b0};
+-assign pix = (lt | sh[5]) ^ rvv;
++    end else if (dot_ce) sh <= {1'b0, sh[5:1]};
++assign pix = (lt | sh[0]) ^ rvv;
+ endmodule
+ `default_nettype wire

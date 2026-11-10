@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/rk86_video16.v b/src/rtl/rk86_16/rk86_video16.v
+index 6b44ec9..c56ee00 100644
+--- a/src/rtl/rk86_16/rk86_video16.v
++++ b/src/rtl/rk86_16/rk86_video16.v
+@@ -24,7 +24,7 @@ reg lt = 1'b0;
+ wire load = dot_ce && cnt12 == LOAD_STATE;
+ always @(posedge clk)
+     if (load) begin
+-        sh <= vsp ? 6'd0 : font_data[5:0];
++        sh <= font_data[5:0];
+         lt <= lten;
+     end else if (dot_ce) sh <= {sh[4:0], 1'b0};
+ assign pix = (lt | sh[5]) ^ rvv;

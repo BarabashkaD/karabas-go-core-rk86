@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/rk86_video16.v b/src/rtl/rk86_16/rk86_video16.v
+index 6b44ec9..cf3e942 100644
+--- a/src/rtl/rk86_16/rk86_video16.v
++++ b/src/rtl/rk86_16/rk86_video16.v
+@@ -21,7 +21,7 @@ module rk86_video16 #(parameter [3:0] LOAD_STATE = 4'd10) (
+ assign font_addr = {cc, lc[2:0]};
+ reg [5:0] sh = 6'd0;
+ reg lt = 1'b0;
+-wire load = dot_ce && cnt12 == LOAD_STATE;
++wire load = dot_ce && cnt12 == 4'd0;
+ always @(posedge clk)
+     if (load) begin
+         sh <= vsp ? 6'd0 : font_data[5:0];

@@ -152,6 +152,9 @@ TESTS = {
                                  ('vg75_ca_underline_field',
                                   'ERROR: vg75: interaction: UUUU = 9: row 1 line 0 char 11 (code e4): HGLT 1, expected 0'
                                   ' (frame 156) (CRT-32, [D79] 1-176)')]),
+    'video16': dict(top='tb_video16', files=['src/sim/machine16/tb_video16.v', 'src/rtl/rk86_16/rk86_video16.v'],
+                    negatives=[('video_load_at_0', 'ERROR: video16: dot'), ('video_shift_order', 'ERROR: video16: dot'),
+                               ('video_lten_unlatched', 'ERROR: video16: lten'), ('video_vsp_ignored', 'ERROR: video16: vsp')]),
 }  # the tasks that add testbenches add their entries
 
 
