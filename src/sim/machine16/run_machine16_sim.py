@@ -62,8 +62,8 @@ TESTS = {
                             ('vv55_pc3_mixed', 'ERROR: vv55: pc3 mixed')]),
     'vt57': dict(top='tb_vt57', files=['src/sim/machine16/tb_vt57.v', 'src/rtl/rk86_16/k580vt57.v'],
                  negatives=[('vt57_extra_state', 'ERROR: vt57: dack at 36'), ('vt57_s4_to_s1', 'ERROR: vt57: period 36'),
-                            ('vt57_address_early', 'ERROR: vt57: address'), ('vt57_one_edge', 'ERROR: vt57:'),
-                            ('vt57_aen_gap', 'ERROR: vt57: aen at 31')]),
+                            ('vt57_address_early', 'ERROR: vt57: address'), ('vt57_one_edge', 'ERROR: vt57: aen rise 0'),
+                            ('vt57_aen_gap', 'ERROR: vt57: aen at 31'), ('vt57_hrq_late', 'ERROR: vt57: latency 36')]),
 }  # the tasks that add testbenches add their entries
 
 

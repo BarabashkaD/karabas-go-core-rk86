@@ -43,7 +43,7 @@ always @(posedge clk) begin
 end
 integer n16 = 0, s1 = -1000, rel = -1000, transfers = 0, holds = 0, aen_n = 0, errors = 0, samp = -1000, last_s1 = -1000;
 integer conts = 0;
-reg ext = 1'b1, first = 1'b1, adstb_q = 1'b0, hrq_q = 1'b0, aen_q = 1'b0, open = 1'b0;
+reg ext = 1'b1, first = 1'b1, adstb_q = 1'b0, hrq_q = 1'b0, aen_q = 1'b0, open = 1'b0, drq_seen = 1'b0;
 reg cont_exp = 1'b0;               // the S4 decision of the data sheet: DRQ and HLDA at the θ↓ that starts S4 (rel 27)
 reg [4:0] aen_h = 5'd0;            // AEN of the last five samples, [0] the newest
 reg [15:0] exp_a = 16'h76D0;
@@ -58,7 +58,9 @@ task finish_transfer; begin
     exp_a = transfers == 2340 ? 16'h76D0 : exp_a + 16'd1;   // autoload from channel 3
 end endtask
 always @(posedge clk) if (ce16) begin
-    if (f2_fall && drq2 && !hrq && !aen) samp = n16;           // the DRQ sample in SI
+    // the latency anchor: the first θ↓ that sees DRQ2 high after it rose (independent of the DUT's HRQ / AEN)
+    if (!drq2) drq_seen = 1'b0;
+    if (f2_fall && drq2 && !drq_seen) begin samp = n16; drq_seen = 1'b1; end
     if (adstb && !adstb_q) begin                               // ADSTB rose at θ↑(S1) = edge 4
         if (open) finish_transfer;                             // the previous transfer ended with S4 → S1
         s1 = n16 - 5;

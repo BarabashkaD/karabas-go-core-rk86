@@ -71,6 +71,7 @@ reg        rdy = 1'b1;
 reg        dack_on = 1'b0;
 reg        done = 1'b0, done_tc = 1'b0, done_upd = 1'b0;
 reg  [1:0] done_ch = 2'd0;
+reg [15:0] done_a = 16'h0000;      // the address of the transfer that ended at the last S4
 reg        iow_q = 1'b1, ior_q = 1'b1, w_cs = 1'b0, r_cs = 1'b0;
 reg  [3:0] w_a = 4'd0, r_a = 4'd0;
 reg  [7:0] w_d = 8'h00;
@@ -107,7 +108,9 @@ wire [1:0] uch = done_ch;
 wire utc = done_tc;
 wire uupd = done_upd;
 assign dack_n = dack_on ? ~(4'd1 << ch) : 4'hF;
-assign a_o = ad[ch];
+// the finished transfer's address holds from the θ↓ that ends S4 to the update at θ↑ (rel 36-39), also when the next
+// cycle switches channel or reloads channel 2 (TAHR: valid after IOR↑ / MEMR↑)
+assign a_o = done ? done_a : ad[ch];
 wire [15:0] rsel = a_i[0] ? tr[a_i[2:1]] : ad[a_i[2:1]];
 assign d_o = a_i[3] ? {3'b000, upd, tcs} : (ff ? rsel[15:8] : rsel[7:0]);
 
@@ -162,7 +165,7 @@ always @(posedge clk) begin
                     end else state <= SW;
                 S4: begin
                         dack_on <= 1'b0; ior_n_o <= 1'b1; memr_n <= 1'b1;
-                        done <= 1'b1; done_ch <= ch; done_tc <= tc_now; done_upd <= upd_cyc; upd_cyc <= 1'b0;
+                        done <= 1'b1; done_ch <= ch; done_a <= ad[ch]; done_tc <= tc_now; done_upd <= upd_cyc; upd_cyc <= 1'b0;
                         if (cont) begin
                             state <= S1; ch <= cont_ch;
                             if (reload && cont_ch == 2'd2) begin ad[2] <= ad[3]; tr[2] <= tr[3]; reload <= 1'b0; upd_cyc <= 1'b1; end

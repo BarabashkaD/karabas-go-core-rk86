@@ -1,0 +1,21 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..99405ef 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -72,6 +72,7 @@ reg        dack_on = 1'b0;
+ reg        done = 1'b0, done_tc = 1'b0, done_upd = 1'b0;
+ reg  [1:0] done_ch = 2'd0;
+ reg [15:0] done_a = 16'h0000;      // the address of the transfer that ended at the last S4
++reg        seen = 1'b0;
+ reg        iow_q = 1'b1, ior_q = 1'b1, w_cs = 1'b0, r_cs = 1'b0;
+ reg  [3:0] w_a = 4'd0, r_a = 4'd0;
+ reg  [7:0] w_d = 8'h00;
+@@ -150,7 +151,7 @@ always @(posedge clk) begin
+         //---------------- θ↓: the states, DACK, AEN↑, IOR↑ / MEMR↑, the DRQ / HLDA / READY decisions
+         if (th_dn) begin
+             case (state)
+-                SI: if (p[2]) state <= S0;                                // DMA-16: pin-equivalent label
++                SI: begin if (p[2] && seen) state <= S0; seen <= p[2]; end // DMA-16: pin-equivalent label
+                 S0: if (!p[2]) state <= SI;                               // SILENT: DMA-16
+                     else if (hlda) begin
+                         state <= S1; ch <= p[1:0]; aen <= 1'b1;

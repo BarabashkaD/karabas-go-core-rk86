@@ -1,8 +1,8 @@
 diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
-index cb411ee..535ab9a 100644
+index 1df2e12..f1efa55 100644
 --- a/src/rtl/rk86_16/k580vt57.v
 +++ b/src/rtl/rk86_16/k580vt57.v
-@@ -102,10 +102,10 @@ wire [3:0] en_after = mode[3:0] & ~(tc_off ? (4'd1 << ch) : 4'd0);
+@@ -103,10 +103,10 @@ wire [3:0] en_after = mode[3:0] & ~(tc_off ? (4'd1 << ch) : 4'd0);
  wire [1:0] top_after = mode[4] ? ch + 2'd1 : 2'd0;
  wire [2:0] p4 = pick(drq & en_after, top_after);
  // the address and count change at θ↑ after S4 ([C78] 12-109 TAH: valid through the strobes)
@@ -15,5 +15,5 @@ index cb411ee..535ab9a 100644
 +wire utc = tc_now;
 +wire uupd = upd_cyc;
  assign dack_n = dack_on ? ~(4'd1 << ch) : 4'hF;
- assign a_o = ad[ch];
- wire [15:0] rsel = a_i[0] ? tr[a_i[2:1]] : ad[a_i[2:1]];
+ // the finished transfer's address holds from the θ↓ that ends S4 to the update at θ↑ (rel 36-39), also when the next
+ // cycle switches channel or reloads channel 2 (TAHR: valid after IOR↑ / MEMR↑)
