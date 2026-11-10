@@ -1,0 +1,12 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index f600ba3..8b39a97 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -324,6 +324,7 @@ always @(posedge clk) begin
+     end
+     //---------------- a read at RD↑: the status read clears IR, LP, IC, DU, FO ([D79] 1-180)
+     if (rd_n && !rd_q && r_cs) begin
++        if (hold) begin hold <= 1'b0; rel <= 1'b1; end
+         if (r_a0) begin ir <= 1'b0; lp <= 1'b0; ic <= 1'b0; du <= 1'b0; fo <= 1'b0; end
+         else if (rlp != 2'd0) rlp <= rlp - 2'd1;
+     end

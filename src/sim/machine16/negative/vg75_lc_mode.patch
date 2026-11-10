@@ -1,8 +1,8 @@
 diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
-index 1c51aa6..30fd2c2 100644
+index f600ba3..772cd18 100644
 --- a/src/rtl/rk86_16/k580vg75.v
 +++ b/src/rtl/rk86_16/k580vg75.v
-@@ -216,7 +216,7 @@ always @(posedge clk) begin
+@@ -218,7 +218,7 @@ always @(posedge clk) begin
              end
              if (chn == 8'd0) hrtc <= 1'b0;                                           // HRTC falls: a line begins
              if (ir_set) ir <= 1'b1;                                                  // the last display row

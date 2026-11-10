@@ -1,5 +1,5 @@
 diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
-index 1c51aa6..965d994 100644
+index f600ba3..13a9197 100644
 --- a/src/rtl/rk86_16/k580vg75.v
 +++ b/src/rtl/rk86_16/k580vg75.v
 @@ -183,7 +183,7 @@ always @(posedge clk) begin

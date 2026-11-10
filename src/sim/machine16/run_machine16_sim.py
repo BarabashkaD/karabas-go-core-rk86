@@ -94,7 +94,15 @@ TESTS = {
                             ('vg75_preset_row0',
                              'ERROR: vg75: preset: VRTC not high after the first CCLK fall after the releasing command'),
                             ('vg75_lc_mode', 'ERROR: vg75: lc: row 0 line 0 char 0: LC 0, expected 9 (M = 1)'),
-                            ('vg75_lpen_no_flag', 'ERROR: vg75: light pen: after LPEN rise: status bit 4 (LP) 0, expected 1')]),
+                            ('vg75_lpen_no_flag', 'ERROR: vg75: light pen: after LPEN rise: status bit 4 (LP) 0, expected 1'),
+                            ('vg75_preset_keeps_ustop',
+                             'ERROR: vg75: preset after an underrun: the first DRQ 10224 ce16 after the resume CCLK fall'),
+                            ('vg75_preset_release_write',
+                             'ERROR: vg75: preset: VRTC high while the counters are held, after a parameter write'),
+                            ('vg75_preset_release_read',
+                             'ERROR: vg75: preset: VRTC high while the counters are held, after a status read'),
+                            ('vg75_ir_needs_ve',
+                             'ERROR: vg75: ir: after 40h (Stop Display): 0 IRQ rises in a frame, expected 1')]),
 }  # the tasks that add testbenches add their entries
 
 

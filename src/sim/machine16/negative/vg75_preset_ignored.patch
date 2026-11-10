@@ -1,8 +1,8 @@
 diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
-index 1c51aa6..5887410 100644
+index f600ba3..37866f3 100644
 --- a/src/rtl/rk86_16/k580vg75.v
 +++ b/src/rtl/rk86_16/k580vg75.v
-@@ -305,7 +305,7 @@ always @(posedge clk) begin
+@@ -307,7 +307,7 @@ always @(posedge clk) begin
                  3'd4: begin pexp <= 3'd2; ptyp <= 1'b1; end                          // Load Cursor
                  3'd5: ie <= 1'b1;                                                    // Enable Interrupt
                  3'd6: ie <= 1'b0;                                                    // Disable Interrupt

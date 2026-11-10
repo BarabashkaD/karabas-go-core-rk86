@@ -1,5 +1,5 @@
 diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
-index 1c51aa6..bcffab9 100644
+index f600ba3..6289b4e 100644
 --- a/src/rtl/rk86_16/k580vg75.v
 +++ b/src/rtl/rk86_16/k580vg75.v
 @@ -89,7 +89,7 @@ reg [6:0] rw = 7'd0;           // row counter: 0..R display, R+1..R+VV+1 retrace

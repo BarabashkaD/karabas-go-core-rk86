@@ -193,6 +193,8 @@ always @(posedge clk) begin
             ch <= line_last; ln <= 4'd0; rw <= row_last;
             hrtc <= 1'b0; vrtc <= 1'b0; vsp <= 1'b1; lten <= 1'b0; rvv <= 1'b0; hglt <= 1'b0; la <= 2'b00; gpa <= 2'b00;
             drq <= 1'b0; fill <= 1'b0; space <= 6'd0; bleft <= 4'd0; eor <= 1'b0; fr <= 4'd0;
+            ustop <= 1'b0;                      // S12 / S11 (decided): the preset starts a new frame cycle, its first
+                                                // DMA is the row 0 fill; ublank stays until the row 0 start
         end else if (!hold) begin
             if (rel) begin                      // the resume: the row start of the last retrace row (VRTC↑,
                 rel <= 1'b0;                    // the row 0 fill) with the actions of a VRTC rise
@@ -259,7 +261,7 @@ always @(posedge clk) begin
     end
     //---------------- a DMA byte at WR↑ with DACK ([D79] 1-185 tDW, tWD)
     if (wr_n && !wr_q && w_dack) begin
-        if (fill && !filled) begin                                                   // SILENT S14
+        if (fill && !filled && !(cclk && preset)) begin   // SILENT S14; at the preset CCLK the byte is ignored
             t_tf = 1'b0; t_stop = 1'b0;
             if (to_fifo) begin
                 fifo[{!dsel, iw}] <= w_d[6:0]; iw <= iw + 4'd1;

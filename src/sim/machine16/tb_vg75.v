@@ -61,11 +61,11 @@ task ev(input integer id); begin ev_cnt[id] = ev_cnt[id] + 1; ev_t[id] = st_q; e
 // character since the HRTC fall, ri the row whose start was the last row-start HRTC rise (0 at the VRTC fall)
 integer tl = -1, tc = 0, ri = 0, rs_row = 0, rs_prev = 0, row, line, e_lc;
 reg synced = 1'b0;
-integer m_nh = 1, m_nr = 1, m_nv = 1, m_nl = 1, m_u = 0;
+integer m_nh = 1, m_nr = 1, m_nv = 1, m_nl = 1, m_u = 0, m_z = 0;
 reg m_m = 1'b0, m_sp = 1'b0;
 // the frame window: armed by the TB, on from the next VRTC fall to the one after it
 reg fw_arm = 1'b0, fw_on = 1'b0, fw_done = 1'b0, lc_chk = 1'b0, vsp_chk = 1'b0, e_vsp;
-integer n_lc = 0, n_vsp = 0;
+integer n_lc = 0, n_vsp = 0, n_lcr = 0, n_vret = 0, e_lcr;
 integer drq_rows [0:63];
 // the cursor: one result per frame
 reg cur_on = 1'b0, cur_first = 1'b0, cur_seen = 1'b0;
@@ -75,11 +75,12 @@ integer nf = 0;
 integer pr = 0, t_res = 0, t_relw = 0, hr_res = -1, drq_res = -1, vf_res = -1, vr_res = -1, dma_res = 0, dma_vf = 0;
 reg pr_pend = 1'b0, cc_chk = 1'b0;
 reg [3:0] pr_e = 4'd0;
+reg [8*32-1:0] pr_ctx = "after E0h";    // what the TB last did while held, for the held messages
 reg [7:0] e_cc;
 integer n_cc = 0;
 // the DMA stand-in
 integer ndma = 0, img_r = 0, img_c = 0, dst = 0, dcnt = 0;
-reg img_restart = 1'b0;
+reg img_restart = 1'b0, dma_off = 1'b0;    // dma_off: the stand-in does not answer DRQ (an underrun)
 // the last CPU write: its WR rise, the row starts and the first DRQ rise after it
 integer t_wrup = 0, rs_at_wrup = 0, drq1_t = -1, drq1_rs_t = 0, drq1_rs_row = 0, drq1_rs_prev = 0, drq1_nrs = 0;
 reg cclk_q = 1'b0, cpu_wr_q = 1'b1, hrtc_q = 1'b0, vrtc_q = 1'b0, drq_q = 1'b0, irq_q = 1'b0, x_seen = 1'b0;
@@ -101,10 +102,18 @@ always @(posedge clk) begin
         if (vsp_hi && vsp !== 1'b1 && !vsp_hi_e) begin vsp_hi_e = 1'b1; err("vsp: low with VE = 0"); end
         // CRT-12: held after E0h; VRTC up at the resume
         if (pr == 2) begin
-            if (hrtc !== 1'b0 && !pr_e[0]) begin pr_e[0] = 1'b1; err2("preset: HRTC high while the counters are held", ID12); end
-            if (vrtc !== 1'b0 && !pr_e[1]) begin pr_e[1] = 1'b1; err2("preset: VRTC high while the counters are held", ID12); end
-            if (vsp !== 1'b1 && !pr_e[2]) begin pr_e[2] = 1'b1; err2("preset: VSP low while the counters are held", ID12); end
-            if (drq !== 1'b0 && !pr_e[3]) begin pr_e[3] = 1'b1; err2("preset: DRQ high while the counters are held", ID12); end
+            if (hrtc !== 1'b0 && !pr_e[0]) begin
+                pr_e[0] = 1'b1; $sformat(msg, "preset: HRTC high while the counters are held, %0s", pr_ctx); err2(msg, ID12);
+            end
+            if (vrtc !== 1'b0 && !pr_e[1]) begin
+                pr_e[1] = 1'b1; $sformat(msg, "preset: VRTC high while the counters are held, %0s", pr_ctx); err2(msg, ID12);
+            end
+            if (vsp !== 1'b1 && !pr_e[2]) begin
+                pr_e[2] = 1'b1; $sformat(msg, "preset: VSP low while the counters are held, %0s", pr_ctx); err2(msg, ID12);
+            end
+            if (drq !== 1'b0 && !pr_e[3]) begin
+                pr_e[3] = 1'b1; $sformat(msg, "preset: DRQ high while the counters are held, %0s", pr_ctx); err2(msg, ID12);
+            end
         end else if (pr == 3) begin
             pr = 4;
             if (vrtc !== 1'b1) err2("preset: VRTC not high after the first CCLK fall after the releasing command", ID12);
@@ -128,7 +137,7 @@ always @(posedge clk) begin
             tl = -1; ri = 0; synced = 1'b1;
             if (fw_on) begin fw_on = 1'b0; fw_done = 1'b1; end
             if (fw_arm) begin
-                fw_arm = 1'b0; fw_on = 1'b1; n_lc = 0; n_vsp = 0;
+                fw_arm = 1'b0; fw_on = 1'b1; n_lc = 0; n_vsp = 0; n_lcr = 0; n_vret = 0;
                 for (mk = 0; mk < 64; mk = mk + 1) drq_rows[mk] = 0;
             end
             if (cur_on) begin
@@ -142,6 +151,19 @@ always @(posedge clk) begin
         if (vr_ev) cc_chk = 1'b0;
         if (pr == 4 && vr_ev && vf_res >= 0 && vr_res < 0) vr_res = st_q;
         if (pr == 4 && hr_ev && hr_res < 0) hr_res = st_q;
+        // LC holds the next line's value from the CCLK fall of the HRTC rise ([D79] Fig. 15, 27; VID-2)
+        if (fw_on && lc_chk && hr_ev && tl >= 0) begin
+            line = (tl + 1) % m_nl; e_lcr = m_m ? (line == 0 ? m_nl - 1 : line - 1) : line; n_lcr = n_lcr + 1;
+            if (lc !== e_lcr) begin
+                $sformat(msg, "lc: at the HRTC rise after line %0d: LC %0d, expected %0d (the next line's)", tl, lc, e_lcr);
+                err(msg);
+            end
+        end
+        // VSP high at every CCLK fall during HRTC and VRTC ([D79] 1-163 pin 35)
+        if (fw_on && vsp_chk && cclk_q && (hrtc === 1'b1 || vrtc === 1'b1)) begin
+            n_vret = n_vret + 1;
+            if (vsp !== 1'b1) begin $sformat(msg, "vsp: low during HRTC / VRTC (line %0d char %0d)", tl, tc); err(msg); end
+        end
         // DRQ, IRQ, the IR set event
         if (drq === 1'b1 && drq_q === 1'b0) begin
             ev(E_DRQ);
@@ -204,11 +226,11 @@ end
 //---------------- the DMA stand-in
 always @(posedge clk) if (ce16) begin
     case (dst)
-        0: if (drq === 1'b1) begin dst = 1; dcnt = 0; end
+        0: if (drq === 1'b1 && !dma_off) begin dst = 1; dcnt = 0; end
         1: begin
             dcnt = dcnt + 1;
             if (dcnt >= 20 && !cpu_busy) begin
-                if (drq === 1'b1) begin dack_n <= 1'b0; dma_d <= 8'h20 + (img_r + img_c) % 64; dst = 2; dcnt = 0; end
+                if (drq === 1'b1 && !dma_off) begin dack_n <= 1'b0; dma_d <= 8'h20 + (img_r + img_c) % 64; dst = 2; dcnt = 0; end
                 else dst = 0;
             end
         end
@@ -304,7 +326,7 @@ task program(input [7:0] p1, input [7:0] p2, input [7:0] p3, input [7:0] p4); be
     vh_en = 1'b0;
     wr(1'b1, 8'h00); wr(1'b0, p1); wr(1'b0, p2); wr(1'b0, p3); wr(1'b0, p4);
     synced = 1'b0; m_sp = p1[7]; m_nh = p1[6:0] + 1; m_nv = p2[7:6] + 1; m_nr = p2[5:0] + 1;
-    m_u = p3[7:4]; m_nl = p3[3:0] + 1; m_m = p4[7];
+    m_u = p3[7:4]; m_nl = p3[3:0] + 1; m_m = p4[7]; m_z = p4[3:0];
     wait_ev(E_HF, 2 * LINE, "program: HRTC fall", tw); wait_ev(E_HF, 2 * LINE, "program: HRTC fall", tw);
     vh_en = 1'b1;
 end endtask
@@ -346,11 +368,57 @@ task frame_window;
         end
     end
 endtask
+// the counts of a frame window: LC at the HRTC rises after line 0 (all lines but the first); the CCLK falls in
+// HRTC or VRTC (all positions of the frame cycle but the display characters)
+task window_counts(input [8*24-1:0] what);
+    integer e;
+    begin
+        if (lc_chk && n_lcr != (m_nr + m_nv) * m_nl - 1) begin
+            $sformat(msg, "lc: %0s: %0d HRTC rises checked, expected %0d", what, n_lcr, (m_nr + m_nv) * m_nl - 1); err(msg);
+        end
+        e = (m_nr + m_nv) * m_nl * (m_nh + 2 * (m_z + 1)) - m_nr * m_nl * m_nh;
+        if (vsp_chk && n_vret != e) begin
+            $sformat(msg, "vsp: %0s: %0d CCLK falls in HRTC / VRTC checked, expected %0d", what, n_vret, e); err(msg);
+        end
+    end
+endtask
 // a row whose start begins a fill ([D79] 1-168, 1-172 Fig. 18): the last retrace row (row 0), or the row before a
 // display row that is not blanked by spaced rows
 function due(input integer r);
     due = r == m_nr + m_nv - 1 || (r + 1 < m_nr && !(m_sp && (r + 1) % 2 == 1));
 endfunction
+// the resume after E0h (S12): VRTC with the release CCLK fall (the monitor), DRQ within a burst space, the first HRTC
+// rise after 78 CCLK, VRTC high 852 CCLK with the 78 bytes of the row 0 fill, line 0 of every row from the image
+// rows in order, then the frames of CRT-3
+integer tb0, tb1, tb2;
+task resume_chk(input [8*24-1:0] lbl, input info); begin
+    tb0 = n16;
+    while (pr != 4 || vf_res < 0) begin
+        @(negedge clk);
+        if (n16 > tb0 + 2 * FRAME) begin $display("FATAL: vg75: %0s: the resume and the VRTC fall timed out", lbl); $finish; end
+    end
+    vh_en = 1'b1;
+    if (drq_res < 0 || drq_res - t_res > 84) begin
+        $sformat(msg, "%0s: the first DRQ %0d ce16 after the resume CCLK fall, expected 0..84 (the row 0 fill, CRT-20)", lbl, drq_res - t_res);
+        err(msg);
+    end
+    if (info) $display("INFO: vg75: after E0h the first DRQ comes %0d ce16 after the command (row 0 fill, S12)", drq_res - t_relw);
+    if (hr_res - t_res != 936) begin $sformat(msg, "%0s: the first HRTC rise %0d ce16 after the resume, expected 936 (78 CCLK)", lbl, hr_res - t_res); err(msg); end
+    if (vf_res - t_res != 10224) begin $sformat(msg, "%0s: VRTC high %0d ce16 from the resume, expected 10224 (852 CCLK)", lbl, vf_res - t_res); err(msg); end
+    if (dma_vf - dma_res != 78) begin $sformat(msg, "%0s: %0d DMA transfers before the VRTC fall, expected 78 (the row 0 fill)", lbl, dma_vf - dma_res); err(msg); end
+    tb0 = n16;
+    while (vr_res < 0) begin
+        @(negedge clk);
+        if (n16 > tb0 + 2 * FRAME) begin $display("FATAL: vg75: %0s: the VRTC rise timed out", lbl); $finish; end
+    end
+    if (n_cc != 30 * 78) begin $sformat(msg, "%0s: %0d CC samples on line 0 of the rows, expected 2340", lbl, n_cc); err(msg); end
+    if (vr_res - vf_res != 309600) begin $sformat(msg, "%0s: VRTC fall to rise %0d ce16, expected 309600 (30 rows)", lbl, vr_res - vf_res); err(msg); end
+    wait_ev(E_VF, 2 * FRAME, "preset: VRTC fall", tb1);
+    wait_ev(E_VR, 2 * FRAME, "preset: VRTC rise", tb2);
+    if (tb1 - vr_res != 10320) begin $sformat(msg, "%0s: VRTC high %0d ce16 in the next frame, expected 10320", lbl, tb1 - vr_res); err(msg); end
+    if (tb2 - vr_res != FRAME) begin $sformat(msg, "%0s: VRTC rise to rise %0d ce16 in the next frame, expected 319920", lbl, tb2 - vr_res); err(msg); end
+    status_is(8'h00, 8'h02, "after the resume");
+end endtask
 integer t0, t1, t2, i, c, c2, p1, p2, p3, nt;
 reg [7:0] v1, v2, v3;
 initial begin
@@ -403,23 +471,27 @@ initial begin
     //---------------- 4. CRT-4 line counter modes (LLLL = 9)
     ids = "CRT-4, [D79] 1-169 Fig. 10, 11";
     program(8'h4D, 8'h04, 8'h99, 8'h93);
-    lc_chk = 1'b1; frame_window; lc_chk = 1'b0;
+    lc_chk = 1'b1; frame_window; window_counts("M = 1"); lc_chk = 1'b0;
     if (n_lc != 50) begin $sformat(msg, "lc: M = 1: %0d lines checked, expected 50", n_lc); err(msg); end
     program(8'h4D, 8'h04, 8'h99, 8'h13);
-    lc_chk = 1'b1; frame_window; lc_chk = 1'b0;
+    lc_chk = 1'b1; frame_window; window_counts("M = 0"); lc_chk = 1'b0;
     if (n_lc != 50) begin $sformat(msg, "lc: M = 0: %0d lines checked, expected 50", n_lc); err(msg); end
     //---------------- 5. CRT-5 the underline line and the top / bottom blanking
     ids = "CRT-5, [D79] 1-170 Fig. 12, 13";
+    // VSP also checked high at every CCLK fall of HRTC and VRTC ([D79] 1-163 pin 35)
     program(8'h4D, 8'h04, 8'h99, 8'h93); wr(1'b1, 8'h27);
-    vsp_chk = 1'b1; frame_window; vsp_chk = 1'b0;
+    vsp_chk = 1'b1; frame_window; window_counts("UUUU = 9"); vsp_chk = 1'b0;
     if (n_vsp != 5 * 10 * 78) begin $sformat(msg, "vsp: UUUU = 9: %0d positions checked, expected 3900", n_vsp); err(msg); end
+    program(8'h4D, 8'h04, 8'h89, 8'h93); wr(1'b1, 8'h27);          // UUUU = 8: the MSB alone blanks ([D79] 1-178)
+    vsp_chk = 1'b1; frame_window; window_counts("UUUU = 8"); vsp_chk = 1'b0;
+    if (n_vsp != 5 * 10 * 78) begin $sformat(msg, "vsp: UUUU = 8: %0d positions checked, expected 3900", n_vsp); err(msg); end
     program(8'h4D, 8'h04, 8'h79, 8'h93); wr(1'b1, 8'h27);
-    vsp_chk = 1'b1; frame_window; vsp_chk = 1'b0;
+    vsp_chk = 1'b1; frame_window; window_counts("UUUU = 7"); vsp_chk = 1'b0;
     if (n_vsp != 5 * 10 * 78) begin $sformat(msg, "vsp: UUUU = 7: %0d positions checked, expected 3900", n_vsp); err(msg); end
     //---------------- 6. CRT-6 spaced rows: the odd rows blanked, no DMA for them
     ids = "CRT-6, [D79] 1-168 Fig. 9, 1-178";
     program(8'hCD, 8'h09, 8'h99, 8'h93); wr(1'b1, 8'h27);      // 10 rows: 0, 2, ..., 8 shown, 1, 3, ..., 9 blanked
-    vsp_chk = 1'b1; frame_window; vsp_chk = 1'b0;
+    vsp_chk = 1'b1; frame_window; window_counts("spaced rows"); vsp_chk = 1'b0;
     if (n_vsp != 10 * 10 * 78) begin $sformat(msg, "spaced rows: %0d positions checked, expected 7800", n_vsp); err(msg); end
     for (i = 0; i < m_nr + m_nv; i = i + 1)
         if ((drq_rows[i] != 0) != due(i)) begin
@@ -455,6 +527,19 @@ initial begin
     wait_cclk;
     vsp_hi = 1'b1;
     frame_is(10320, FRAME, "after 40h");
+    // interrupts remain enabled after 40h ([D79] 1-179): IRQ 299 376 ce16 after the VRTC fall (a frame window: no
+    // wait on IRQ itself, so a missing IRQ is an ERROR)
+    wait_ev(E_VF, 2 * FRAME, "ir: VRTC fall after 40h", t0);
+    rd(1'b1, sv);
+    c = ev_cnt[E_IRQ];
+    wait_ev(E_VF, 2 * FRAME, "ir: VRTC fall after 40h", t2);
+    if (ev_cnt[E_IRQ] != c + 1) begin
+        $sformat(msg, "ir: after 40h (Stop Display): %0d IRQ rises in a frame, expected 1 (interrupts remain enabled)", ev_cnt[E_IRQ] - c);
+        err(msg);
+    end else if (ev_t[E_IRQ] - t0 != 299376) begin
+        $sformat(msg, "ir: after 40h (Stop Display): IRQ rise %0d ce16 after the VRTC fall, expected 299376", ev_t[E_IRQ] - t0);
+        err(msg);
+    end
     vsp_hi = 1'b0;
     //---------------- 8. CRT-8 interrupts
     ids = "CRT-8, [D79] 1-172 Fig. 19, 20, 1-179, 1-180";
@@ -573,37 +658,37 @@ initial begin
     program(8'h4D, 8'h1D, 8'h99, 8'h93); wr(1'b1, 8'h27);
     wait_ev(E_VF, 2 * FRAME, "preset: VRTC fall", t0);
     wait_ev(E_VF, 2 * FRAME, "preset: VRTC fall", t0);
-    pr = 1;
+    pr = 1; pr_ctx = "after E0h";
     wr(1'b1, 8'hE0);
-    wait_n(3 * FRAME);
+    wait_n(FRAME);
+    // held until a command other than E0h ([D79] 1-179): a second E0h, a parameter write (IC, S16) and a status read
+    // do not release; each followed by two lines of the held checks
+    pr_ctx = "after a second E0h"; pr_e = 4'd0;
+    wr(1'b1, 8'hE0); wait_n(2 * LINE);
+    pr_ctx = "after a parameter write"; pr_e = 4'd0;
+    wr(1'b0, 8'h55); wait_n(2 * LINE);
+    pr_ctx = "after a status read"; pr_e = 4'd0;
+    status_is(8'h08, 8'h08, "preset: held: the parameter write (S16)"); wait_n(2 * LINE);
+    wait_n(2 * FRAME - 6 * LINE);
     img_restart = 1'b1;
     wr(1'b1, 8'h80); wr(1'b0, 8'h00); wr(1'b0, 8'h00);
-    t0 = n16;
-    while (pr != 4 || vf_res < 0) begin
-        @(negedge clk);
-        if (n16 > t0 + 2 * FRAME) begin $display("FATAL: vg75: preset: the resume and the VRTC fall timed out"); $finish; end
-    end
-    vh_en = 1'b1;
-    if (drq_res < 0 || drq_res - t_res > 84) begin
-        $sformat(msg, "preset: the first DRQ %0d ce16 after the resume CCLK fall, expected 0..84 (the row 0 fill, CRT-20)", drq_res - t_res);
-        err(msg);
-    end
-    $display("INFO: vg75: after E0h the first DRQ comes %0d ce16 after the command (row 0 fill, S12)", drq_res - t_relw);
-    if (hr_res - t_res != 936) begin $sformat(msg, "preset: the first HRTC rise %0d ce16 after the resume, expected 936 (78 CCLK)", hr_res - t_res); err(msg); end
-    if (vf_res - t_res != 10224) begin $sformat(msg, "preset: VRTC high %0d ce16 from the resume, expected 10224 (852 CCLK)", vf_res - t_res); err(msg); end
-    if (dma_vf - dma_res != 78) begin $sformat(msg, "preset: %0d DMA transfers before the VRTC fall, expected 78 (the row 0 fill)", dma_vf - dma_res); err(msg); end
-    t0 = n16;
-    while (vr_res < 0) begin
-        @(negedge clk);
-        if (n16 > t0 + 2 * FRAME) begin $display("FATAL: vg75: preset: the VRTC rise timed out"); $finish; end
-    end
-    if (n_cc != 30 * 78) begin $sformat(msg, "preset: %0d CC samples on line 0 of the rows, expected 2340", n_cc); err(msg); end
-    if (vr_res - vf_res != 309600) begin $sformat(msg, "preset: VRTC fall to rise %0d ce16, expected 309600 (30 rows)", vr_res - vf_res); err(msg); end
-    wait_ev(E_VF, 2 * FRAME, "preset: VRTC fall", t1);
-    wait_ev(E_VR, 2 * FRAME, "preset: VRTC rise", t2);
-    if (t1 - vr_res != 10320) begin $sformat(msg, "preset: VRTC high %0d ce16 in the next frame, expected 10320", t1 - vr_res); err(msg); end
-    if (t2 - vr_res != FRAME) begin $sformat(msg, "preset: VRTC rise to rise %0d ce16 in the next frame, expected 319920", t2 - vr_res); err(msg); end
-    status_is(8'h00, 8'h02, "after the resume");
+    resume_chk("preset", 1'b1);
+    //---------------- 12b. Preset Counters with an underrun pending (C1, decided 2026-11-10: the preset clears the
+    // underrun's DMA stop, its first DMA is the row 0 fill; the board's tape I/O leaves an underrun, then 27h, E0h)
+    ids = "CRT-12, [D79] 1-179, 1-180, S11, S12";
+    wait_ev(E_VF, 2 * FRAME, "preset: VRTC fall", t0);
+    dma_off = 1'b1;                                     // the stand-in stops answering: the row 1 fill stalls
+    wait_n(3 * 10 * LINE);
+    status_is(8'h02, 8'h02, "preset after an underrun: before 27h, E0h");
+    wr(1'b1, 8'h27);
+    pr = 1; pr_ctx = "after E0h, an underrun pending"; pr_e = 4'd0;
+    hr_res = -1; drq_res = -1; vf_res = -1; vr_res = -1; cc_chk = 1'b0;
+    wr(1'b1, 8'hE0);
+    dma_off = 1'b0;
+    wait_n(FRAME);
+    img_restart = 1'b1;
+    wr(1'b1, 8'h80); wr(1'b0, 8'h00); wr(1'b0, 8'h00);
+    resume_chk("preset after an underrun", 1'b0);
     //---------------- 13. CRT-13 (the monitor, the whole run)
     if (errors == 0) $display("PASS: vg75 (%0d ce16)", n16);
     $finish;
