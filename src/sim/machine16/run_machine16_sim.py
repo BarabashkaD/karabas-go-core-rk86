@@ -49,6 +49,12 @@ TESTS = {
                                 ('dot_ce_odd', 'ERROR: clocks16: dot_ce alignment'),
                                 ('cclk_misaligned', 'ERROR: clocks16: cclk_fall alignment'),
                                 ('ststb_reset_lag', 'ERROR: clocks16: ststb at period')]),
+    'vv55': dict(top='tb_vv55', files=['src/sim/machine16/tb_vv55.v', 'src/rtl/rk86_16/k580vv55.v'],
+                 negatives=[('vv55_no_output_reset', 'ERROR: vv55: mode set'), ('vv55_bsr_bit', 'ERROR: vv55: bsr'),
+                            ('vv55_ibf_on_rd_fall', 'ERROR: vv55: mode 1 input'),
+                            ('vv55_obf_ack_ignored', 'ERROR: vv55: mode 1 output'),
+                            ('vv55_mode2_buffer', 'ERROR: vv55: mode 2'),
+                            ('vv55_pc_upper_mode0_only', 'ERROR: vv55: port C byte write')]),
 }  # the tasks that add testbenches add their entries
 
 

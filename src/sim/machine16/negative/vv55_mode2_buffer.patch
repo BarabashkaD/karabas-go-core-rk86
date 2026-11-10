@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vv55.v b/src/rtl/rk86_16/k580vv55.v
+index b52d7cb..1849683 100644
+--- a/src/rtl/rk86_16/k580vv55.v
++++ b/src/rtl/rk86_16/k580vv55.v
+@@ -69,7 +69,7 @@ assign pc_oe = ctl_out | (~ctl & io_out);
+ assign pc_o = (ctl_out & ctl_val) | (~ctl & lc);
+ wire [7:0] pc_pin = (pc_oe & pc_o) | (~pc_oe & pc_i);
+ assign pa_o = la;
+-assign pa_oe = a_m2 ? !acka_n : !a_in;
++assign pa_oe = a_m2 ? 1'b1 : !a_in;
+ assign pb_o = lb;
+ assign pb_oe = !b_in;
+ wire [7:0] pa_pin = pa_oe ? la : pa_i;

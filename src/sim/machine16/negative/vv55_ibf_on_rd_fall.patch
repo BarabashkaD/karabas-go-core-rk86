@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vv55.v b/src/rtl/rk86_16/k580vv55.v
+index b52d7cb..727908a 100644
+--- a/src/rtl/rk86_16/k580vv55.v
++++ b/src/rtl/rk86_16/k580vv55.v
+@@ -103,7 +103,7 @@ always @(posedge clk) begin
+     end else begin
+         // strobed input: the latch follows the port while STB is low; IBF set by STB low, reset by RD↑
+         if ((a_m2 || (a_m1 && a_in)) && !stba_n) begin ia <= pa_i; ibfa <= 1'b1; end
+-        if (rda_q && !rd_a) ibfa <= 1'b0;
++        if (!rda_q && rd_a) ibfa <= 1'b0;
+         if (b_m1 && b_in && !stbb_n) begin ib <= pb_i; ibfb <= 1'b1; end
+         if (rdb_q && !rd_b) ibfb <= 1'b0;
+         // strobed output: OBF (low = full) set by WR↑, reset by ACK low
