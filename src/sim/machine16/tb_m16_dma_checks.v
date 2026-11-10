@@ -14,12 +14,24 @@
 //    address: the monitor in start-up (the TB's su_exp) and at E000-FFFF, the RAM shadow below 8000, the
 //    TB's ext_di at A000-BFFF; the 8255 (8000-9FFF) and the 8275 (C000-DFFF) are excluded (ERROR:
 //    sample). At every 8275 DMA byte (the clk after the 8257 IOR rise with DACK2, where the 8275 takes
-//    w_d) w_d must be the RAM shadow byte of that transfer's address (ERROR: dma byte). Both count their
-//    mismatches without stopping the run (each kind printed at most 10 times, one summary error each at
-//    the end), so a fault that breaks both shows both. The clk where HLDA rises inside T3 and the clk
-//    where AEN rises are counted (and checked when the CPU samples there).
-//    The RAM shadow: written at every clk with CPU WR low, AEN low, start-up off and A15 = 0 (the TB
-//    memory's write rule); never written bytes are 00 (the TB memory's power-up content).
+//    w_d) w_d must be the RAM shadow byte of that transfer's address (ERROR: dma byte). The transfer's
+//    address is latched at its ADSTB rise (theta-up of S1, rel 4); from the clk after it until AEN falls
+//    or the next ADSTB rise (the update at theta-up after S4, rel 40) the 8257 address and the system
+//    address must stay at it, through the IOR rise ([C78] TAHR); it must have A15 = 0 (a RAM address)
+//    and follow the monitor's channel 2 block (BIOS 0x2E7-0x2FA): DMA byte n since the boot is block
+//    transfer k = n mod 2340 at 76D0h + k (the autoload from channel 3 restarts it at 76D0h); and the
+//    first DMA byte of every frame from fa on (the row 0 fill in the retrace row) must be block transfer
+//    0 (the 8257 in step with the frame) (all ERROR: dma byte). Each kind counts its mismatches without
+//    stopping the run (each kind printed at most 10 times, one summary error each at the end), so a fault
+//    that breaks several shows them all. The clk where HLDA rises inside T3 and the clk where AEN rises
+//    are counted (and checked when the CPU samples there).
+//    The RAM shadow: written at every clk with CPU WR low, AEN low, start-up off and A15 = 0, the TB
+//    memory's write rule (the TB memory writes at the first clk of WR low, the shadow at every one, with
+//    the same address and data); never written bytes are 00 (the TB memory's power-up content).
+//    Known coverage limits (review of Tasks 13-14, mutants m6, m7): the moment a row fill starts (the
+//    first DRQ of a fill against the row start) is not checked, only the margin at its end (INFO in
+//    stats.txt); the data of the DMA byte check is the monitor's screen content only, so a fault in a bit
+//    that no screen byte of the boot sets (e.g. bit 7) can pass.
 // 3. frame.hex: pix (0 / 1, one line per dot) at every pix_ce for 516 x 310 dots from a VRTC fall, the
 //    last frame completed before done (from the arming point on; each capture must be exactly 516 x 310
 //    dots from one VRTC fall to the next). stats.txt: per frame the ce16 with AEN high, the HOLD periods,
@@ -39,6 +51,8 @@ localparam integer X_XFER = 7020;        // 3 x 2340 DMA bytes
 localparam integer DOTS = 516 * 310;
 localparam integer NF = 64;              // frames in stats.txt
 localparam integer PRINTS = 10;          // mismatch lines per kind
+localparam [15:0] X_BASE = 16'h76D0;     // the monitor's channel 2 block: 76D0h, 2340 transfers, autoload
+localparam integer X_BLOCK = 2340;
 
 wire clk = `M16.clk;
 
@@ -61,7 +75,9 @@ end
 //---------------- state
 reg aen_q = 1'b0, hold_q = 1'b0, hlda_q = 1'b0, ior_q = 1'b1, dack_q = 1'b0, vrtc_q = 1'b0;
 reg [6:0] rw_q = 7'd0;
-reg [15:0] xa = 16'h0000;
+reg [15:0] xa = 16'h0000, xe;
+reg adstb_q = 1'b0, xa_on = 1'b0, xa_ok = 1'b0, xa_rep = 1'b0;
+integer xk, a_bad = 0, q_bad = 0, f_bad = 0, n_ad = 0, n_hold = 0, n_fs = 0, fs_fr = -1;
 reg win = 1'b0, win_end = 1'b0, fin = 1'b0;
 integer obs = 0, fr = -1, hl_cur = 0, last_byte = 0, row_x = 0;
 // the window, frames fa .. fa + 2
@@ -142,6 +158,14 @@ task final_checks;
             err; end
         if (s_bad != 0) begin $display("ERROR: sample: %0d mismatches in all", s_bad); err; end
         if (d_bad != 0) begin $display("ERROR: dma byte: %0d mismatches of %0d DMA bytes", d_bad, d_n); err; end
+        $display("INFO: machine16: DMA addresses: %0d latched at ADSTB, %0d clk held, %0d frame starts checked",
+                 n_ad, n_hold, n_fs);
+        if (a_bad != 0) begin $display("ERROR: dma byte: the DMA address moved after the ADSTB rise in %0d transfers", a_bad); err; end
+        if (q_bad != 0) begin $display("ERROR: dma byte: %0d DMA bytes not at the address of the 8257 block", q_bad); err; end
+        if (f_bad != 0) begin $display("ERROR: dma byte: %0d frames whose first DMA byte is not transfer 0 of the 8257 block", f_bad); err; end
+        if (d_n == 0 || n_ad != d_n || n_hold == 0 || (`M16.arm && n_fs != `M16.frame - `M16.fa)) begin
+            $display("ERROR: dma byte: %0d DMA bytes, %0d addresses latched, %0d clk held, %0d frame starts checked, expected %0d, %0d, nonzero, %0d",
+                     d_n, n_ad, n_hold, n_fs, d_n, d_n, `M16.arm ? `M16.frame - `M16.fa : 0); err; end
         if (fb_written == 0) begin $display("ERROR: frame.hex: no complete frame captured"); err; end
         else $display("INFO: machine16: frame.hex: 516 x 310 dots from the VRTC fall at ce16 %0d (%0d frames written in turn)",
                       fb_from, fb_written);
@@ -234,14 +258,52 @@ always @(posedge clk) if (!`M16.done && !fin) begin
             end
         end
     end
-    //---- the 8275 DMA bytes: the address while IOR is low with DACK2; the byte at the clk after IOR rises
-    if (!`D16.dma.ior_n_o && !`D16.dma.dack_n[2]) xa = `D16.dma.a_o;
+    //---- the 8275 DMA bytes: the address latched at the ADSTB rise and held; the byte at the clk after IOR rises
+    if (`D16.dma.adstb && !adstb_q) begin
+        xa = `D16.dma.a_o; xa_on = 1'b1; xa_ok = 1'b1; xa_rep = 1'b0;
+    end else if (xa_on) begin
+        if (!`D16.dma.aen) xa_on = 1'b0;                          // the transfer's bus cycle is over
+        else begin
+            n_hold = n_hold + 1;
+            if ((`D16.dma.a_o !== xa || `D16.bus_a !== xa) && !xa_rep) begin
+                xa_rep = 1'b1; a_bad = a_bad + 1;
+                if (a_bad <= PRINTS)
+                    $display("ERROR: dma byte: the DMA address moved after the ADSTB rise: 8257 A %h, bus_a %h, latched %h (IOR %0s; ce16 %0d, frame %0d)",
+                             `D16.dma.a_o, `D16.bus_a, xa, `D16.dma.ior_n_o ? "high" : "low", `M16.n16, fr);
+            end
+        end
+    end
     if (`D16.dma.ior_n_o && !ior_q && dack_q) begin
         d_n = d_n + 1;
         if (win) w_xfer = w_xfer + 1;
         if (fr >= 0 && fr < NF) st_xfer[fr] = st_xfer[fr] + 1;
         last_byte = `M16.n16;
         row_x = row_x + 1;
+        // the address: latched, a RAM address, the monitor's block; the frame's first byte is transfer 0
+        xk = (d_n - 1) % X_BLOCK;
+        xe = X_BASE + xk;
+        if (xa_ok) n_ad = n_ad + 1;
+        if (!xa_ok || xa[15] || xa !== xe) begin
+            q_bad = q_bad + 1;
+            if (q_bad <= PRINTS) begin
+                if (!xa_ok) $display("ERROR: dma byte: DMA byte %0d without an ADSTB rise since the last one (ce16 %0d, frame %0d)",
+                                     d_n, `M16.n16, fr);
+                else if (xa[15]) $display("ERROR: dma byte: DMA byte %0d at %h: not a RAM address (A15 set), expected %h (ce16 %0d, frame %0d)",
+                                          d_n, xa, xe, `M16.n16, fr);
+                else $display("ERROR: dma byte: DMA byte %0d at %h, expected %h (76d0 + transfer %0d of the 8257 block of %0d, autoload; ce16 %0d, frame %0d)",
+                              d_n, xa, xe, xk, X_BLOCK, `M16.n16, fr);
+            end
+        end
+        if (`M16.arm && fr >= `M16.fa && fr != fs_fr) begin
+            fs_fr = fr; n_fs = n_fs + 1;
+            if (xk != 0) begin
+                f_bad = f_bad + 1;
+                if (f_bad <= PRINTS)
+                    $display("ERROR: dma byte: frame %0d: its first DMA byte (the row 0 fill) is transfer %0d of the 8257 block (%h), expected transfer 0 at 76d0: the 8257 out of step with the frame (ce16 %0d)",
+                             fr, xk, xe, `M16.n16);
+            end
+        end
+        xa_ok = 1'b0;
         if (`D16.crt.w_d !== ram[xa[14:0]]) begin
             d_bad = d_bad + 1;
             if (d_bad <= PRINTS)
@@ -272,7 +334,7 @@ always @(posedge clk) if (!`M16.done && !fin) begin
     end
     aen_after = aen_rise;
     aen_q = `D16.dma.aen; hold_q = `D16.cpu.pin_hold; hlda_q = `D16.cpu.pin_hlda;
-    ior_q = `D16.dma.ior_n_o; dack_q = !`D16.dma.dack_n[2]; vrtc_q = `D16.crt.vrtc; rw_q = `D16.crt.rw;
+    ior_q = `D16.dma.ior_n_o; dack_q = !`D16.dma.dack_n[2]; adstb_q = `D16.dma.adstb; vrtc_q = `D16.crt.vrtc; rw_q = `D16.crt.rw;
 end
 
 //---------------- at the end of the frames (the TB's done, before its late phases)

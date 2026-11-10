@@ -67,7 +67,7 @@ TESTS = {
                             ('vt57_aen_gap', 'ERROR: vt57: aen at 31'), ('vt57_hrq_late', 'ERROR: vt57: latency 36'),
                             # the 8257 data sheet review of 2026-11-11 (merged.md A2-A12)
                             ('vt57_no_ext_write', 'ERROR: vt57: memw at 13 (transfer 0)'),
-                            ('vt57_no_autoload_copy', 'ERROR: vt57: address at 0 (transfer 2340)'),
+                            ('vt57_no_autoload_copy', 'ERROR: vt57: address at 4 (transfer 2340)'),
                             ('vt57_cycle_bits_swapped', 'ERROR: vt57: ior at 13 (transfer 0)'),
                             ('vt57_s0_no_hlda', 'ERROR: vt57: latency 9 (transfer 0)'),
                             ('vt57_adstb_long', 'ERROR: vt57: adstb at 13 (transfer 0)'),

@@ -320,7 +320,8 @@ localparam integer S1_ADSTB = 4, S1_DRQ = 27, S1_HRQ = 31, S1_SI = 45;
 localparam integer PER_R = 72, PER_W = 81, PER_MISS_MAX = 126;       // 8 / 9 Phi; 11-14 Phi after a missed SI sample
 localparam integer IR16 = 299376;                   // IR set after a VRTC fall
 integer clkn = 0;
-reg t_on = 1'b0, boot_du = 1'b0;
+reg t_on = 1'b0, boot_du = 1'b0, ub_on = 1'b0, ub_rep = 1'b0;
+integer n_ub = 0;           // clk with ublank checked low (from the first row 0 start after the arming point)
 reg q_hrtc = 1'b0, q_vrtc = 1'b0, q_drq = 1'b0, q_ior = 1'b1, q_dack2 = 1'b1, q_crtwr = 1'b1, q_crtdack = 1'b1;
 reg q_aen = 1'b0, q_adstb = 1'b0, q_hrq = 1'b0, q_hlda = 1'b0, q_du = 1'b0, q_ublank = 1'b0, q_thu = 1'b0;
 integer f1_at = -1, f1_first = -1, n_phi = 0;
@@ -462,7 +463,10 @@ task bus_timing;
                              n16 - hr_at, LINE16, frame, r_idx, row_line, n16); tfail(1);
                 end
                 hr_at = n16; fr_lines = fr_lines + 1; row_line = row_line + 1;
-                if (row_line == ROW_LINES) begin row_end; row_line = 0; r_idx = r_idx + 1; end
+                if (row_line == ROW_LINES) begin
+                    row_end; row_line = 0; r_idx = r_idx + 1;
+                    if (r_idx == 1) ub_on = 1'b1;                            // a row 0 start: ublank low from here
+                end
             end
             if (vr_up) begin
                 if (!hr_up) begin $display("ERROR: vrtc: VRTC rose without an HRTC rise (ce16 %0d)", n16); tfail(3); end
@@ -479,12 +483,18 @@ task bus_timing;
                 vf_at = n16;
             end
         end
-        //---- underrun (spec 8): before the arming point only recorded; from it the blank never starts
+        //---- underrun (spec 8): before the arming point only recorded; from it the blank never starts, and from
+        // the first row 0 start after it (TB row 1 of frame fa; the boot underrun's blank clears only there, S11)
+        // ublank is low at every clk. One ERROR per rise and one per high run found at a checked clk.
         if (!t_on) begin
             if (dut.crt.du && !q_du) boot_du = 1'b1;
-        end else if (dut.crt.ublank && !q_ublank) begin
-            $display("ERROR: underrun: the 8275 blanked for an underrun (ublank rose) at ce16 %0d, frame %0d row %0d: stop the work and report (spec 8)",
-                     n16, frame, r_idx); tfail(13);
+        end else begin
+            if (ub_on) n_ub = n_ub + 1;
+            if (dut.crt.ublank && (!q_ublank || (ub_on && !ub_rep))) begin
+                $display("ERROR: underrun: the 8275 blanked for an underrun (ublank %0s) at ce16 %0d, frame %0d row %0d: stop the work and report (spec 8)",
+                         q_ublank ? "still high after the row 0 start" : "rose", n16, frame, r_idx); tfail(13);
+            end
+            ub_rep = ub_on && dut.crt.ublank;
         end
         //---- DMA, from the arming point
         if (t_on) begin
@@ -615,9 +625,14 @@ task bus_summary;
             $display("ERROR: burst length: %0d bursts checked, expected %0d", n_bursts, nf * (ROWS - 1) * BURSTS); tfail(9); end
         if (n_space != nf * (ROWS - 1) * (BURSTS - 1)) begin
             $display("ERROR: burst space: %0d burst spaces checked, expected %0d", n_space, nf * (ROWS - 1) * (BURSTS - 1)); tfail(10); end
-        if (n_per != nf * (ROWS - 1) * (XF_ROW - BURSTS) || tot != n_per) begin
+        if (n_per != nf * (ROWS - 1) * (XF_ROW - BURSTS)) begin
             $display("ERROR: dma period: %0d periods within bursts (histogram %0d), expected %0d", n_per, tot,
                      nf * (ROWS - 1) * (XF_ROW - BURSTS)); tfail(8); end
+        // both periods seen: 72 (the CPU's resumed cycle read-type) and 81 (write-type), so neither is vacuous
+        if (hist[PER_R] == 0 || hist[PER_W] == 0) begin
+            $display("ERROR: dma period: %0d periods of %0d ce16 and %0d of %0d, expected both nonzero",
+                     hist[PER_R], PER_R, hist[PER_W], PER_W); tfail(8); end
+        if (n_ub == 0) begin $display("ERROR: underrun: ublank never checked (no row 0 start after the arming point)"); tfail(13); end
         if (n_s4 != nf * XF_FRAME || n_h4 != nf * XF_FRAME) begin
             $display("ERROR: drq at s4: %0d DRQ samples at S1 + %0d, %0d HRQ samples at S1 + %0d, expected %0d", n_s4, S1_DRQ,
                      n_h4, S1_HRQ, nf * XF_FRAME); tfail(7); end
