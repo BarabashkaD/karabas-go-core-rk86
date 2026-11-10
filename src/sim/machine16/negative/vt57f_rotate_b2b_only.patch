@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..98a41b2 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -203,7 +203,7 @@ always @(posedge clk) begin
+                 tr[uch][13:0] <= tr[uch][13:0] - 14'd1;
+             end
+             if (utc && mode[6] && !(mode[7] && uch == 2'd2)) mode[uch] <= 1'b0;     // TC stop
+-            if (mode[4]) top <= uch + 2'd1;                                           // rotating priority
++            if (mode[4] && cont) top <= uch + 2'd1;                                           // rotating priority
+             if (uupd) upd <= 1'b0;                                                    // the reload cycle is over
+         end
+     end

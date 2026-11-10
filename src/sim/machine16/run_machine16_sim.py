@@ -80,7 +80,11 @@ TESTS = {
                                  ('vt57f_s0_no_return', 'ERROR: vt57f: s0 return'),
                                  ('vt57f_mode_any_a', 'ERROR: vt57f: addressing'),
                                  ('vt57f_status_a_only', 'ERROR: vt57f: addressing'),
-                                 ('vt57f_illegal_strobes', 'ERROR: vt57f: illegal cycle')]),
+                                 ('vt57f_illegal_strobes', 'ERROR: vt57f: illegal cycle'),
+                                 ('vt57f_rotate_b2b_only', 'ERROR: vt57f: rotating'),
+                                 ('vt57f_tcstop_all', 'ERROR: vt57f: tc stop'),
+                                 ('vt57f_reset_keeps_up', 'ERROR: vt57f: reset'),
+                                 ('vt57f_reload_any_channel', 'ERROR: vt57f: autoload')]),
 }  # the tasks that add testbenches add their entries
 
 

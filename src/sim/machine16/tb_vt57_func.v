@@ -295,6 +295,18 @@ initial begin
     wait_idle;
     run_order(12, 48'h012301230123, 1'b1);
     holds_is(1);
+    // 2b. the rotation also between HOLD periods ("after each DMA cycle"): CH-0 served alone, then DRQ0 and DRQ1
+    // together → CH-1 first
+    part("rotating", "DMA-2, [C78] 12-103");
+    mode_set(8'h1F);                                             // CH-0 highest again
+    prog(0, 16'h0600, 16'h4001); prog(1, 16'h1600, 16'h4001);
+    request(0, 1, 1'b0);
+    wait_idle;
+    run_ch(1, 0, 1'b0);
+    part("rotating", "DMA-2, [C78] 12-103");
+    request_all(4'h3, 1, 1'b0);
+    wait_idle;
+    run_order(2, 8'h10, 1'b1);
 
     // 3. DMA-3: channel enables
     part("enables", "DMA-3, [C78] 12-103");
@@ -387,14 +399,19 @@ initial begin
 
     // 9. DMA-9: TC stop
     part("tc stop", "DMA-9, [C78] 12-102, 12-103");
-    mode_set(8'h41);
+    mode_set(8'h43);                                             // TC stop, CH-0 and CH-1
     prog(0, 16'h9000, 16'h4003);
+    prog(1, 16'h9800, 16'h4001);
     request(0, 6, 1'b0);                                         // DRQ0 held for 6
     wait_idle;
     run_ch(4, 0, 1'b1);
     wait_ce(500);
     ck(quiet >= 500 && ntr - ntr0 == 4, "channel 0 served after TC with TC stop");
-    mode_set(8'h01);                                             // enabled again, without TC stop
+    part("tc stop", "DMA-9, [C78] 12-103 (the selected channel)"); // only the TC channel is disabled
+    request(1, 1, 1'b0);                                         // DRQ0 still high
+    wait_idle;
+    run_ch(1, 1, 1'b0);
+    mode_set(8'h01);                                           // enabled again, without TC stop
     part("tc stop", "DMA-9, DMA-27, [C78] 12-102, 12-103");
     wait_idle;
     run_ch(2, 0, 1'b1);
@@ -447,6 +464,27 @@ initial begin
     status_is(8'h14, "after the TC cycle");
     mode_set(8'h04);
     status_is(8'h00, "after a mode write without autoload");
+    // the reload waits for the next channel 2 cycle ("at the beginning of the next channel 2 DMA cycle"): a CH-0
+    // cycle in between leaves UP set and channel 2 unchanged
+    part("autoload", "DMA-10, DMA-24, [C78] 12-103, 12-104");
+    mode_set(8'h85);                                             // autoload, CH-0 and CH-2
+    prog(2, 16'hA800, 16'h4000);                                 // one transfer (TC), copied to channel 3
+    prog(3, 16'hB800, 16'h4001);                                 // channel 3 own: the next block
+    prog(0, 16'h0800, 16'h4001);
+    request(2, 1, 1'b0);
+    wait_idle;
+    run_ch(1, 2, 1'b0);
+    status_is(8'h14, "after the TC cycle of channel 2");
+    part("autoload", "DMA-10, DMA-24, [C78] 12-103, 12-104");
+    request(0, 1, 1'b0);
+    wait_idle;
+    run_ch(1, 0, 1'b0);
+    status_is(8'h10, "after a channel 0 cycle between");         // UP still set: no reload yet
+    part("autoload", "DMA-10, DMA-24, [C78] 12-103, 12-104");
+    request(2, 1, 1'b0);                                         // the reload cycle: B800
+    wait_idle;
+    run_ch(1, 2, 1'b0);
+    status_is(8'h00, "after the reload cycle of channel 2");
 
     // 11. DMA-11: MARK
     part("mark", "DMA-11, [C78] 12-102, 12-109, 12-110");
@@ -509,6 +547,23 @@ initial begin
     reg_is(4'd2, 16'hD002, "address kept");
     reg_is(4'd3, 16'h4007, "count kept");
     request(1, 0, 1'b0);
+    // RESET clears the update flag and the TC bits: UP from a channel 2 TC cycle with autoload (proved by a read,
+    // which keeps it), then TC1 from a channel 1 TC cycle, then RESET
+    part("reset", "DMA-13, DMA-24, [C78] 12-101, 12-104");
+    mode_set(8'h86);
+    prog(2, 16'h2D00, 16'h4000);
+    prog(1, 16'h1D00, 16'h4000);
+    request(2, 1, 1'b0);
+    wait_idle;
+    run_ch(1, 2, 1'b0);
+    status_is(8'h14, "UP and TC2 before RESET");
+    part("reset", "DMA-13, DMA-24, [C78] 12-101, 12-104");
+    request(1, 1, 1'b0);
+    wait_idle;
+    run_ch(1, 1, 1'b0);
+    @(negedge clk) reset = 1'b1; repeat (10) @(negedge clk); reset = 1'b0; repeat (20) @(negedge clk);
+    mode_tb = 8'h00;
+    status_is(8'h00, "UP and TC1 after RESET");
 
     // 14. DMA-14: CS ignored in master mode
     part("cs", "DMA-14, [C78] 12-101");
@@ -550,6 +605,8 @@ initial begin
     end
 
     // 16. DMA-16: S0 wait states
+    // The timing of checks 16 and 17 is anchored on the DUT's HRQ↑ by design: they test what happens in S0 after
+    // HRQ, not the HRQ latency, which tb_vt57 (Task 6) anchors on DRQ (the first θ↓ that sees it).
     part("s0 wait", "DMA-16, [C78] 12-105, Fig. 6");
     mode_set(8'h09);
     prog(0, 16'h0A00, 16'h4000);
@@ -572,7 +629,8 @@ initial begin
     end
 
     // 17. DMA-16 (SILENT, the accepted choice): every DRQ falls while in S0 → back to SI
-    part("s0 return", "DMA-16 SILENT choice, [C78] 12-105, Fig. 6");
+    // (anchored on the DUT's HRQ↑ by design, as check 16; the HRQ latency from DRQ is tb_vt57's)
+    part("s0 return","DMA-16 SILENT choice, [C78] 12-105, Fig. 6");
     mode_set(8'h02);
     prog(1, 16'h1700, 16'h4000);
     @(negedge clk) begin hlda_off = 1'b1; t = n16; end

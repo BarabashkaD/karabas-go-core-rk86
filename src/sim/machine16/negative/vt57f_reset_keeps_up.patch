@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..390e6ef 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -120,7 +120,7 @@ always @(posedge clk) begin
+     if (!iow_n_i) begin w_cs <= !cs_n && !master; w_a <= a_i; w_d <= d_i; end
+     if (!ior_n_i) begin r_cs <= !cs_n && !master; r_a <= a_i; end
+     if (reset) begin
+-        state <= SI; mode <= 8'h00; tcs <= 4'd0; upd <= 1'b0; reload <= 1'b0; upd_cyc <= 1'b0;
++        state <= SI; mode <= 8'h00; tcs <= 4'd0; reload <= 1'b0; upd_cyc <= 1'b0;
+         ff <= 1'b0; top <= 2'd0; cont <= 1'b0; rdy <= 1'b1;
+         hrq <= 1'b0; aen <= 1'b0; adstb <= 1'b0; memr_n <= 1'b1; memw_n <= 1'b1; ior_n_o <= 1'b1; iow_n_o <= 1'b1;
+         tc <= 1'b0; mark <= 1'b0; dack_on <= 1'b0; done <= 1'b0;
