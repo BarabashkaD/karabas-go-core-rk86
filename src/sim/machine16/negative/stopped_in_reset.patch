@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/rk86_clocks16.v b/src/rtl/rk86_16/rk86_clocks16.v
+index 53a68af..a5e2488 100644
+--- a/src/rtl/rk86_16/rk86_clocks16.v
++++ b/src/rtl/rk86_16/rk86_clocks16.v
+@@ -37,7 +37,7 @@ module rk86_clocks16 #(parameter F2_STEP = 2, parameter F2_FALL_STEP = 7) (
+ reg [3:0] step = 4'd0;      // SILENT: the power-up phase of the 8224 against the ИЕ4 (both 0 here)
+ reg [3:0] cnt = 4'd0;
+ always @(posedge clk)
+-    if (ce16) begin
++    if (ce16 && resin_n) begin
+         step <= step == 4'd8 ? 4'd0 : step + 4'd1;
+         cnt <= cnt == 4'd11 ? 4'd0 : cnt + 4'd1;
+         phi1 <= step == 4'd0 || step == 4'd1;

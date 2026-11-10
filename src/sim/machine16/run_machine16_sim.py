@@ -36,7 +36,16 @@ OUT = os.path.join('build', 'sim', 'machine16')
 NEGATIVE_DIR = os.path.join('src', 'sim', 'machine16', 'negative')
 MEM = 'src/sim/machine16/tb_rk86_mem16.v'
 
-TESTS = {}  # filled by the tasks that add testbenches
+TESTS = {
+    'clocks16': dict(top='tb_clocks16', files=['src/sim/machine16/tb_clocks16.v', 'src/rtl/rk86_16/rk86_clocks16.v'],
+                     negatives=[('divider_10', 'ERROR: clocks16: f1 period 10'), ('f2_step_4', 'ERROR: clocks16: f2 at step 4'),
+                                ('f2_fall_step_6', 'ERROR: clocks16: f2_fall at step 6'),
+                                ('reset_on_f1', 'ERROR: clocks16: reset changed off p3'),
+                                ('reset_on_f2_fall', 'ERROR: clocks16: reset changed off p3'),
+                                ('ststb_no_reset', 'ERROR: clocks16: ststb at period'),
+                                ('stopped_in_reset', 'ERROR: clocks16: f1 period'),
+                                ('ie4_div10', 'ERROR: clocks16: ie4 count')]),
+}  # the tasks that add testbenches add their entries
 
 
 def prj_files(prj):
