@@ -157,7 +157,8 @@ TESTS = {
                     negatives=[('video_load_at_0', 'ERROR: video16: dot'), ('video_shift_order', 'ERROR: video16: dot'),
                                ('video_lten_unlatched', 'ERROR: video16: lten'), ('video_vsp_ignored', 'ERROR: video16: vsp')]),
     'machine16': dict(top='tb_rk86_machine16',
-                      files=lambda: ['src/sim/machine16/cpu_power_up.vh', 'src/sim/machine16/tb_rk86_machine16.v', MEM]
+                      files=lambda: ['src/sim/machine16/cpu_power_up.vh', 'src/sim/machine16/tb_rk86_machine16.v',
+                                     'src/sim/machine16/tb_m16_dma_checks.v', MEM]
                       + prj_files('src/rk86_machine16.prj'),
                       hexfiles=dict(bios='src/roms/BIOS.BIN', font='src/roms/FONT.BIN'),
                       negatives=[('crt_wr_without_ior', 'ERROR: glue: 8275 WR'),
@@ -167,7 +168,9 @@ TESTS = {
                                  ('vg75_drq_held', 'ERROR: hold periods'),
                                  ('vg75_burst_count_ignored', 'ERROR: burst length'),
                                  ('vg75_burst_space_ignored', 'ERROR: burst space'),
-                                 ('vg75_hrtc_7', 'ERROR: hrtc')]),
+                                 ('vg75_hrtc_7', 'ERROR: hrtc'),
+                                 ('bus_on_hlda', 'ERROR: glue: bus_a'), ('vt57_extra_state', 'ERROR: dma cost'),
+                                 ('vt57_s4_to_s1', 'ERROR: hold periods'), ('mem16_dropped_after_rd', 'ERROR: dma byte')]),
 }  # the tasks that add testbenches add their entries
 
 

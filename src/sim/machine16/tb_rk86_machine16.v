@@ -773,5 +773,6 @@ initial begin
     if (errors == 0) $display("PASS: machine16 (%0d frames)", frame);
     $finish;
 end
+tb_m16_dma_checks dma_checks();     // DMA cost, sample checks, frame.hex, stats.txt (tb_m16_dma_checks.v)
 endmodule
 `default_nettype wire

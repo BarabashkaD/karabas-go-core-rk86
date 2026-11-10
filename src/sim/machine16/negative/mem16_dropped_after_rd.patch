@@ -1,0 +1,12 @@
+diff --git a/src/sim/machine16/tb_rk86_mem16.v b/src/sim/machine16/tb_rk86_mem16.v
+index 1f9642d..c7e304f 100644
+--- a/src/sim/machine16/tb_rk86_mem16.v
++++ b/src/sim/machine16/tb_rk86_mem16.v
+@@ -25,6 +25,6 @@ always @(posedge clk) begin
+     if (wr_q && !cpu_wr_n && !aen && !rom && !bus_a[15]) ram[bus_a[14:0]] <= cpu_do;
+     q <= rom ? bios[bus_a[10:0]] : ram[bus_a[14:0]];
+ end
+-assign mem_di = q;
++assign mem_di = mem_rd ? q : 8'hFF;
+ endmodule
+ `default_nettype wire

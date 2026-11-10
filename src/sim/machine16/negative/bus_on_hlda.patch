@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/rk86_machine16.v b/src/rtl/rk86_16/rk86_machine16.v
+index a4353f2..67027b8 100644
+--- a/src/rtl/rk86_16/rk86_machine16.v
++++ b/src/rtl/rk86_16/rk86_machine16.v
+@@ -65,7 +65,7 @@ k580vt57 dma(.clk(clk), .th_up(f2), .th_dn(f2_fall), .reset(sys_reset),
+     .cs_n(~sel_top), .ior_n_i(1'b1), .iow_n_i(cpu_wr_n), .a_i(bus_a[3:0]), .d_i(cpu_do), .d_o(),
+     .drq({1'b0, crt_drq, 2'b00}), .hlda(hlda), .ready(ready), .hrq(hold), .dack_n(dack_n), .a_o(dma_a),
+     .aen(aen), .adstb(), .memr_n(), .memw_n(memw_n), .ior_n_o(ior_n), .iow_n_o(), .tc(), .mark());
+-assign bus_a = aen ? dma_a : cpu_a;
++assign bus_a = hlda ? dma_a : cpu_a;
+ //---------------- 8275
+ wire [6:0] cc;
+ wire [3:0] lc;
