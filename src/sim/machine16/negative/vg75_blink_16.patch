@@ -1,0 +1,23 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index f600ba3..83d4119 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -241,15 +241,15 @@ always @(posedge clk) begin
+                     if (p_f) t_v = 1'b1;                             // non-transparent: a blank position (SILENT S7)
+                     else begin                                       // transparent: the FIFO character
+                         t_cc = fifo_q; fr <= fr + 4'd1;
+-                        t_v = t_code[1] && frame[4]; t_l = t_code[5] && t_reg == 2'd1;
++                        t_v = t_code[1] && frame[3]; t_l = t_code[5] && t_reg == 2'd1;
+                         t_r = t_code[4]; t_h = t_code[0]; t_g = t_code[3:2];
+                     end
+                 end else if (t_code[7:6] == 2'b11) begin             // character attribute 11CCCCBH (SILENT S7)
+                     t_ca = ca_table(t_code[5:2], t_reg);
+-                    t_la = t_ca[3:2]; t_v = t_ca[1] || (t_code[1] && frame[4]); t_l = t_ca[0];
++                    t_la = t_ca[3:2]; t_v = t_ca[1] || (t_code[1] && frame[3]); t_l = t_ca[0];
+                     t_h = t_code[0]; t_r = fa[4]; t_g = fa[3:2];      // affected by R and GG only ([D79] 1-176)
+                 end else begin                                       // a character
+-                    t_v = fa[1] && frame[4]; t_l = fa[5] && t_reg == 2'd1; t_r = fa[4]; t_h = fa[0]; t_g = fa[3:2];
++                    t_v = fa[1] && frame[3]; t_l = fa[5] && t_reg == 2'd1; t_r = fa[4]; t_h = fa[0]; t_g = fa[3:2];
+                 end
+                 if (t_cur && !p_c[0]) t_r = !t_r;                     // reverse video block (SILENT S4)
+                 if (t_cur && p_c[0] && t_reg == 2'd1) t_l = 1'b1;     // underline

@@ -136,6 +136,22 @@ TESTS = {
                                  'ERROR: vg75: non-transparent: row 2 line 9 char 1: LTEN 1, expected 0 (CRT-28, [D79] 1-176)'),
                                 ('vg75_fifo_overrun_keeps_first',
                                  'ERROR: vg75: fifo: row 8 line 0 char 0: CC 29, expected 49 (CRT-27, [D79] 1-165, 1-176)')]),
+    'vg75_attr': dict(top='tb_vg75_attr', files=['src/sim/machine16/tb_vg75_attr.v', 'src/rtl/rk86_16/k580vg75.v'],
+                      negatives=[('vg75_ca_table_swapped',
+                                  'ERROR: vg75: char attribute: UUUU = 9: row 0 line 9 char 0 (code c0): LA 1, expected 2'
+                                  ' (frame 66) (CRT-30, [D79] 1-174)'),
+                                 ('vg75_fa_not_reset',
+                                  'ERROR: vg75: field attribute: UUUU = 9: row 0 line 0 char 0 (code 42): RVV 1, expected 0'
+                                  ' (frame 153) (CRT-31, [D79] 1-175)'),
+                                 ('vg75_cursor_no_blink',
+                                  'ERROR: vg75: cursor: CC = 00, cursor at row 0 char 5: row 0 line 0 char 5 (code 2f): RVV 1,'
+                                  ' expected 0 (frame 8) (CRT-33, [D79] 1-177, S3, S4)'),
+                                 ('vg75_blink_16',
+                                  'ERROR: vg75: blink: CC = 00, cursor at row 2 char 5: row 0 line 1 char 3 (code e6): VSP 0,'
+                                  ' expected 1 (frame 16) (CRT-36, [D79] 1-173, 1-175, S3)'),
+                                 ('vg75_ca_underline_field',
+                                  'ERROR: vg75: interaction: UUUU = 9: row 1 line 0 char 11 (code e4): HGLT 1, expected 0'
+                                  ' (frame 156) (CRT-32, [D79] 1-176)')]),
 }  # the tasks that add testbenches add their entries
 
 
