@@ -1,0 +1,21 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index 1c51aa6..c1a3d18 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -290,7 +290,6 @@ always @(posedge clk) begin
+     //---------------- a command or a parameter at WR↑ ([D79] 1-177..1-179)
+     if (wr_n && !wr_q && !w_dack && w_cs) begin
+         if (w_a0) begin
+-            if (pexp != 3'd0) ic <= 1'b1;                                            // SILENT S16
+             pexp <= 3'd0; pidx <= 2'd0;
+             if (hold && w_d[7:5] != 3'd7) begin hold <= 1'b0; rel <= 1'b1; end
+             case (w_d[7:5])
+@@ -307,7 +306,7 @@ always @(posedge clk) begin
+                 3'd6: ie <= 1'b0;                                                    // Disable Interrupt
+                 default: preset <= 1'b1;                                             // Preset Counters
+             endcase
+-        end else if (pexp == 3'd0) ic <= 1'b1;
++        end else if (pexp == 3'd0) ;
+         else begin
+             pexp <= pexp - 3'd1; pidx <= pidx + 2'd1;
+             case ({ptyp, pidx})

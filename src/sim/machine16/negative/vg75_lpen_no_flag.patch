@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index 1c51aa6..965d994 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -183,7 +183,7 @@ always @(posedge clk) begin
+     if (!wr_n) begin w_a0 <= a0; w_d <= d_i; w_cs <= !cs_n; w_dack <= !dack_n; end
+     if (!rd_n) begin r_a0 <= a0; r_cs <= !cs_n; end
+     //---------------- light pen: the counters at the LPEN rising edge ([D79] 1-165, 1-177)
+-    if (lpen && !lpen_q) begin lp_c <= ch[6:0]; lp_r <= rw[5:0]; lp <= 1'b1; end
++    if (lpen && !lpen_q) begin lp_c <= ch[6:0]; lp_r <= rw[5:0]; end
+     //---------------- DMA WR↓ with DACK: DRQ falls ([D79] Fig. 30 tRQ)
+     if (!wr_n && wr_q && !dack_n) drq <= 1'b0;
+     //---------------- CCLK↓

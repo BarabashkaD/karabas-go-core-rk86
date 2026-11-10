@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index 1c51aa6..898994e 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -94,7 +94,7 @@ wire [6:0] r_last = {1'b0, p_r};
+ wire [6:0] row_last = r_last + {5'd0, p_v} + 7'd1;
+ wire [7:0] chn = ch >= line_last ? 8'd0 : ch + 8'd1;
+ // the IR set event: the CCLK↓ that ends HRTC before line 0 of the last display row, with IE ([D79] 1-172)
+-wire ir_set = cclk && !preset && !hold && chn == 8'd0 && rw == r_last && ln == 4'd0 && ie;
++wire ir_set = cclk && !preset && !hold && chn == 8'd0 && rw == r_last && ln == 4'd0;
+ wire [3:0] bcn = 4'd1 << p_bc;                                    // 1, 2, 4, 8 transfers
+ wire [5:0] bsn = p_bs == 3'd0 ? 6'd0 : {p_bs, 3'b000} - 6'd1;     // 0, 7, 15, ..., 55 CCLK
+ //---------------- row buffers, FIFOs, DMA

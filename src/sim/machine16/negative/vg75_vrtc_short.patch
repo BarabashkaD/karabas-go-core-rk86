@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index 1c51aa6..d6186c6 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -155,7 +155,7 @@ endfunction
+ // the start of row rn: VRTC, the buffer swap, the underrun check, the fill of the next row
+ task row_start(input [6:0] rn);
+     begin
+-        vrtc <= rn > r_last;
++        vrtc <= rn > r_last + 7'd1;
+         if (rn == r_last + 7'd1) begin                 // VRTC rises: field attributes and End of Screen reset
+             frame <= frame + 6'd1; eos <= 1'b0; fa <= 6'd0; fa_row <= 6'd0;
+         end else fa_row <= fa;

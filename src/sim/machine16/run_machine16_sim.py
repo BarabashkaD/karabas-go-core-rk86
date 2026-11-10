@@ -85,6 +85,16 @@ TESTS = {
                                  ('vt57f_tcstop_all', 'ERROR: vt57f: tc stop'),
                                  ('vt57f_reset_keeps_up', 'ERROR: vt57f: reset'),
                                  ('vt57f_reload_any_channel', 'ERROR: vt57f: autoload')]),
+    'vg75': dict(top='tb_vg75', files=['src/sim/machine16/tb_vg75.v', 'src/rtl/rk86_16/k580vg75.v'],
+                 negatives=[('vg75_hrtc_7', 'ERROR: vg75: hrtc: power-up: HRTC high 12 ce16, expected 24'),
+                            ('vg75_vrtc_short', 'ERROR: vg75: vrtc: power-up: 0 VRTC rises in 720 ce16, expected 10'),
+                            ('vg75_ir_without_ie', 'ERROR: vg75: ir: power-up: status bit 5 (IR) 1, expected 0'),
+                            ('vg75_ic_never', 'ERROR: vg75: ic: 00h with 2 parameters, then 27h: status bit 3 (IC) 0, expected 1'),
+                            ('vg75_preset_ignored', 'ERROR: vg75: preset: HRTC high while the counters are held'),
+                            ('vg75_preset_row0',
+                             'ERROR: vg75: preset: VRTC not high after the first CCLK fall after the releasing command'),
+                            ('vg75_lc_mode', 'ERROR: vg75: lc: row 0 line 0 char 0: LC 0, expected 9 (M = 1)'),
+                            ('vg75_lpen_no_flag', 'ERROR: vg75: light pen: after LPEN rise: status bit 4 (LP) 0, expected 1')]),
 }  # the tasks that add testbenches add their entries
 
 

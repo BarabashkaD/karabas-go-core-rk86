@@ -1,0 +1,20 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index 1c51aa6..d0a2ca0 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -190,13 +190,13 @@ always @(posedge clk) begin
+     if (cclk) begin
+         if (preset) begin                       // S12 (decided): the top left corner of the frame cycle =
+             preset <= 1'b0; hold <= 1'b1;       // the start of the last retrace row, its row 0 fill to come
+-            ch <= line_last; ln <= 4'd0; rw <= row_last;
++            ch <= line_last; ln <= 4'd0; rw <= 7'd0;
+             hrtc <= 1'b0; vrtc <= 1'b0; vsp <= 1'b1; lten <= 1'b0; rvv <= 1'b0; hglt <= 1'b0; la <= 2'b00; gpa <= 2'b00;
+             drq <= 1'b0; fill <= 1'b0; space <= 6'd0; bleft <= 4'd0; eor <= 1'b0; fr <= 4'd0;
+         end else if (!hold) begin
+             if (rel) begin                      // the resume: the row start of the last retrace row (VRTC↑,
+                 rel <= 1'b0;                    // the row 0 fill) with the actions of a VRTC rise
+-                row_start(row_last);
++                row_start(7'd0);
+                 frame <= frame + 6'd1; eos <= 1'b0; fa <= 6'd0; fa_row <= 6'd0;
+             end
+             ch <= chn;
