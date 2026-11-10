@@ -314,6 +314,13 @@ initial begin
     for (i = 0; i < 4; i = i + 1) prog(i, 16'h0700 + 16'h1000 * i, 16'h4001);
     request_all(4'hF, 2, 1'b0);
     wait_idle;
+    // a disabled channel's DRQ takes no part in the priority and gives no DACK ([C78] 12-98 "Channel Inhibit Logic",
+    // 12-103 enable bits EN0-EN3)
+    t = 0;
+    for (i = ntr0; i < ntr; i = i + 1) if (ch_of[i] == 2'd1 || ch_of[i] == 2'd3) t = t + 1;
+    if (t != 0) begin
+        $sformat(dmsg, "DACK of a disabled channel (CH-1 / CH-3) in %0d transfers", t); ck(1'b0, dmsg);
+    end
     run_order(4, 16'h0022, 1'b1);
     wait_ce(500);                                                // DRQ1 and DRQ3 still high
     ck(quiet >= 500 && ntr - ntr0 == 4, "a disabled channel's DRQ raised HRQ");
@@ -571,7 +578,12 @@ initial begin
     prog(0, 16'hE000, 16'h4003);
     request(0, 4, 1'b0);
     `WAIT_B(w14a, ntr == ntr0 + 2, 2000) wr57(4'd8, 8'h00);                // a mode write in S2 / S3: ignored
-    `WAIT_B(w14b, ntr == ntr0 + 3, 2000) wr57(4'd0, 8'h55);                // an address write: ignored
+    // [C78] 12-101 CS: "In the 'master' mode, CS is automatically disabled": the mode write 00h above leaves channel 0
+    // enabled, so the held DRQ0 goes on back to back (HRQ high through S4, DACK0 of the third transfer 36 ce16 later)
+    t = n16;
+    wait (ntr == ntr0 + 3 || n16 >= t + 200);
+    ck(ntr == ntr0 + 3, "no DACK0 after a mode write in S2 / S3 (HRQ fell: the write disabled the channel)");
+    if (ntr == ntr0 + 3) wr57(4'd0, 8'h55);                                 // an address write: ignored
     a = 4'd8;
     wait_idle;
     run_ch(4, 0, 1'b1);

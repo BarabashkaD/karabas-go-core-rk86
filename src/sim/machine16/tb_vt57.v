@@ -48,6 +48,7 @@ reg cont_exp = 1'b0;               // the S4 decision of the data sheet: DRQ and
 reg [4:0] aen_h = 5'd0;            // AEN of the last five samples, [0] the newest
 reg [15:0] exp_a = 16'h76D0;
 reg [7:0] v;
+reg [15:0] v16;
 task err(input [8*32-1:0] what, input integer x); begin
     $display("ERROR: vt57: %0s %0d (transfer %0d)", what, x, transfers); errors = errors + 1;
     if (errors >= 20) begin $display("FATAL: vt57: too many errors"); $finish; end
@@ -70,6 +71,8 @@ always @(posedge clk) if (ce16) begin
             if (s1 - last_s1 != 36) err("burst period", s1 - last_s1);
             conts = conts + 1;
         end else begin
+            // [C78] 12-104 Fig. 6 (S0 → S0 on HLDA low), 12-105 "waits for as many S0 states as are necessary for the CPU
+            // to return a Hold Acknowledge", 12-109 THS: S1 only after HLDA, 27 ce16 after the DRQ sample with this 8080
             if (s1 - samp != 27) err("latency", s1 - samp);
             if (!first && s1 - last_s1 != 72) err("period", s1 - last_s1);
         end
@@ -77,6 +80,11 @@ always @(posedge clk) if (ce16) begin
     end
     rel = n16 - s1 - 1;
     if (rel == 26) cont_exp = drq2 && hlda;                   // this sample holds the inputs of the θ↓ at edge 27
+    // the pins per transfer ([C78] 12-109 table, 12-110 waveforms): AEN TAEL / TAET; ADSTB TSTT, TSW (θ↑ S1 to θ↑ S2);
+    // DACK TAK (θ↓ S2 to θ↓ S1 / SI); IOR (write cycle, 12-100 count bits 15:14 = 01) TDCL from θ↑ S2, TDCT to θ↓ S1 / SI;
+    // MEMW TDCL from θ↑ S3, or θ↑ S2 with extended write (12-103 bit 5, 12-105), TDCT to θ↑ S4; TC TAK θ↑ S3 to θ↑ S4
+    // in the count-0 cycle (12-99 N - 1, 12-102); HRQ↓ at θ↑ S4 (12-104 Fig. 6 note 2); the address through IOR↑
+    // (TAHR), reloaded from channel 3 at transfer 2340 (12-104 autoload, the channel 3 copy of the channel 2 writes)
     if (rel >= 0 && rel <= 39) begin
         if (aen !== 1'b1) err("aen at", rel);
         if (adstb !== (rel >= 4 && rel <= 12)) err("adstb at", rel);
@@ -139,10 +147,17 @@ initial begin
     repeat (40) @(negedge clk); reset = 1'b0; repeat (20) @(negedge clk);
     // the monitor (BIOS 0x2E7-0x2FA): mode 80h, channel 2 address 76D0h, count 4923h, mode A4h
     wr57(4'd8, 8'h80); wr57(4'd4, 8'hD0); wr57(4'd4, 8'h76); wr57(4'd5, 8'h23); wr57(4'd5, 8'h49); wr57(4'd8, 8'hA4);
+    // the count register counts down by one per cycle ([C78] 12-99 "N - 1 ... TC in the N-th cycle", 12-100, 12-104
+    // register reads, low byte first after the mode write resets F/L): 4923h - 8 after 8 transfers
+    run_to(8);
+    rd57(4'd5, v); v16[7:0] = v; rd57(4'd5, v); v16[15:8] = v;
+    if (v16 !== 16'h491B) err("count after 8 transfers", v16);
     run_to(2340);
     rd57(4'd8, v); if (v[2] !== 1'b1 || v[4] !== 1'b1) err("status after TC", v);
     rd57(4'd8, v); if (v[2] !== 1'b0 || v[4] !== 1'b1) err("status read twice", v);
     run_to(2341);
+    // the update flag is cleared at the end of the reload cycle ([C78] 12-104 "cleared at the conclusion of this DMA
+    // cycle")
     rd57(4'd8, v); if (v[4] !== 1'b0) err("update flag after the reload", v);
     wr57(4'd8, 8'h84); ext = 1'b0;
     run_to(2357);

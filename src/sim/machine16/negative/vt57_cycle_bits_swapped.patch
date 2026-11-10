@@ -1,0 +1,15 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..d686a33 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -94,8 +94,8 @@ wire [2:0] p = pick(drq & mode[3:0], top);
+ wire master = state == S1 || state == S2 || state == S3 || state == SW || state == S4;
+ wire [13:0] cnt = tr[ch][13:0];
+ wire [1:0] cyc = tr[ch][15:14];                      // 00 verify, 01 write, 10 read, 11 illegal (SILENT: no strobes)
+-wire wr_cyc = cyc == 2'b01;
+-wire rd_cyc = cyc == 2'b10;
++wire wr_cyc = cyc == 2'b10;
++wire rd_cyc = cyc == 2'b01;
+ wire tc_now = cnt == 14'd0;
+ // the requests after this cycle, for the S4 decision: TC stop takes the channel out, rotation moves the priority
+ wire tc_off = tc_now && mode[6] && !(mode[7] && ch == 2'd2);

@@ -1,0 +1,15 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..7be5976 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -135,10 +135,8 @@ always @(posedge clk) begin
+             end else begin
+                 if (w_a[0]) begin
+                     if (ff) tr[w_a[2:1]][15:8] <= w_d; else tr[w_a[2:1]][7:0] <= w_d;
+-                    if (mode[7] && w_a[2:1] == 2'd2) begin if (ff) tr[3][15:8] <= w_d; else tr[3][7:0] <= w_d; end
+                 end else begin
+                     if (ff) ad[w_a[2:1]][15:8] <= w_d; else ad[w_a[2:1]][7:0] <= w_d;
+-                    if (mode[7] && w_a[2:1] == 2'd2) begin if (ff) ad[3][15:8] <= w_d; else ad[3][7:0] <= w_d; end
+                 end
+                 ff <= !ff;
+             end

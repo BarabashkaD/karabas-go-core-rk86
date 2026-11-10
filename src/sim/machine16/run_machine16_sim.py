@@ -64,7 +64,18 @@ TESTS = {
     'vt57': dict(top='tb_vt57', files=['src/sim/machine16/tb_vt57.v', 'src/rtl/rk86_16/k580vt57.v'],
                  negatives=[('vt57_extra_state', 'ERROR: vt57: dack at 36'), ('vt57_s4_to_s1', 'ERROR: vt57: period 36'),
                             ('vt57_address_early', 'ERROR: vt57: address'), ('vt57_one_edge', 'ERROR: vt57: aen rise 0'),
-                            ('vt57_aen_gap', 'ERROR: vt57: aen at 31'), ('vt57_hrq_late', 'ERROR: vt57: latency 36')]),
+                            ('vt57_aen_gap', 'ERROR: vt57: aen at 31'), ('vt57_hrq_late', 'ERROR: vt57: latency 36'),
+                            # the 8257 data sheet review of 2026-11-11 (merged.md A2-A12)
+                            ('vt57_no_ext_write', 'ERROR: vt57: memw at 13 (transfer 0)'),
+                            ('vt57_no_autoload_copy', 'ERROR: vt57: address at 0 (transfer 2340)'),
+                            ('vt57_cycle_bits_swapped', 'ERROR: vt57: ior at 13 (transfer 0)'),
+                            ('vt57_s0_no_hlda', 'ERROR: vt57: latency 9 (transfer 0)'),
+                            ('vt57_adstb_long', 'ERROR: vt57: adstb at 13 (transfer 0)'),
+                            ('vt57_ior_end_s4', 'ERROR: vt57: ior at 31 (transfer 0)'),
+                            ('vt57_memw_end_late', 'ERROR: vt57: memw at 31 (transfer 0)'),
+                            ('vt57_tc_s4', 'ERROR: vt57: tc at 22 (transfer 2339)'),
+                            ('vt57_count_frozen', 'ERROR: vt57: count after 8 transfers'),
+                            ('vt57_upd_kept', 'ERROR: vt57: update flag after the reload')]),
     'vt57_func': dict(top='tb_vt57_func', files=['src/sim/machine16/tb_vt57_func.v', 'src/rtl/rk86_16/k580vt57.v'],
                       negatives=[('vt57f_priority_fixed', 'ERROR: vt57f: rotating'),
                                  ('vt57f_read_strobes', 'ERROR: vt57f: read cycle'),
@@ -85,7 +96,10 @@ TESTS = {
                                  ('vt57f_rotate_b2b_only', 'ERROR: vt57f: rotating'),
                                  ('vt57f_tcstop_all', 'ERROR: vt57f: tc stop'),
                                  ('vt57f_reset_keeps_up', 'ERROR: vt57f: reset'),
-                                 ('vt57f_reload_any_channel', 'ERROR: vt57f: autoload')]),
+                                 ('vt57f_reload_any_channel', 'ERROR: vt57f: autoload'),
+                                 # the 8257 data sheet review of 2026-11-11 (merged.md A3, A13)
+                                 ('vt57f_enable_ignored', 'ERROR: vt57f: enables: DACK of a disabled channel'),
+                                 ('vt57f_cs_in_master', 'ERROR: vt57f: cs: no DACK0 after a mode write in S2')]),
     'vg75': dict(top='tb_vg75', files=['src/sim/machine16/tb_vg75.v', 'src/rtl/rk86_16/k580vg75.v'],
                  negatives=[('vg75_hrtc_7', 'ERROR: vg75: hrtc: power-up: HRTC high 12 ce16, expected 24'),
                             ('vg75_vrtc_short', 'ERROR: vg75: vrtc: power-up: 0 VRTC rises in 720 ce16, expected 10'),
@@ -169,7 +183,11 @@ TESTS = {
                                  ('vg75_burst_count_ignored', 'ERROR: burst length'),
                                  ('vg75_burst_space_ignored', 'ERROR: burst space'),
                                  ('vg75_hrtc_7', 'ERROR: hrtc'),
-                                 ('bus_on_hlda', 'ERROR: glue: bus_a'), ('vt57_extra_state', 'ERROR: dma cost'),
+                                 ('bus_on_hlda', 'ERROR: glue: bus_a'),
+                                 # an extra state per transfer: Task 13's HOLD period check is the first ERROR (HRQ
+                                 # high after θ↑ of S4); Task 14's DMA cost check caught it alone before the rebase
+                                 # (Task 14 report)
+                                 ('vt57_extra_state', 'ERROR: hold periods'),
                                  ('vt57_s4_to_s1', 'ERROR: hold periods'), ('mem16_dropped_after_rd', 'ERROR: dma byte')]),
 }  # the tasks that add testbenches add their entries
 

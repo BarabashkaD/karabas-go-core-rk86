@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..fa8c6dc 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -90,7 +90,7 @@ function [2:0] pick(input [3:0] r, input [1:0] t);   // {request, channel}: the
+     end
+ endfunction
+ 
+-wire [2:0] p = pick(drq & mode[3:0], top);
++wire [2:0] p = pick(drq, top);
+ wire master = state == S1 || state == S2 || state == S3 || state == SW || state == S4;
+ wire [13:0] cnt = tr[ch][13:0];
+ wire [1:0] cyc = tr[ch][15:14];                      // 00 verify, 01 write, 10 read, 11 illegal (SILENT: no strobes)
