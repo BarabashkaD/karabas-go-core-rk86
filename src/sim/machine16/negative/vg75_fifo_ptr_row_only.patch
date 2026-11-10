@@ -1,0 +1,16 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index f600ba3..97c26ba 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -204,9 +204,9 @@ always @(posedge clk) begin
+             ch <= chn;
+             t_ln = ln;
+             if (chn == h_last + 8'd1) begin                                          // HRTC rises
+-                hrtc <= 1'b1; eor <= 1'b0; fr <= 4'd0;
++                hrtc <= 1'b1; eor <= 1'b0;
+                 if (ln >= p_l) begin
+-                    t_ln = 4'd0;
++                    t_ln = 4'd0; fr <= 4'd0;
+                     t_rn = rw >= row_last ? 7'd0 : rw + 7'd1;
+                     rw <= t_rn;
+                     row_start(t_rn);

@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index f600ba3..68b9650 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -264,7 +264,7 @@ always @(posedge clk) begin
+         if (fill && !filled && !(cclk && preset)) begin   // SILENT S14; at the preset CCLK the byte is ignored
+             t_tf = 1'b0; t_stop = 1'b0;
+             if (to_fifo) begin
+-                fifo[{!dsel, iw}] <= w_d[6:0]; iw <= iw + 4'd1;
++                if (icount != 5'd16) begin fifo[{!dsel, iw}] <= w_d[6:0]; iw <= iw + 4'd1; end
+                 if (icount == 5'd16) fo <= 1'b1; else icount <= icount + 5'd1;      // overrun: the first ones lost
+                 t_full = ipos > p_h;                                                 // SILENT S13
+             end else begin

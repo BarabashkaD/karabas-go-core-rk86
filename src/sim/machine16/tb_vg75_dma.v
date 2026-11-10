@@ -114,7 +114,7 @@ function [13:0] exp_out(input integer m, input integer r, input integer ln, inpu
     begin
         p = r * m_nh + c;
         e_cc = nbyte(r, c); e_v = m_u >= 8 && (ln == 0 || ln == m_nl - 1); e_l = 1'b0; e_r = 1'b0;
-        k_cc = ln == 0; k_v = 1'b1; k_l = 1'b0; k_r = 1'b0;
+        k_cc = 1'b1; k_v = 1'b1; k_l = 1'b0; k_r = 1'b0;          // CC on every line (the FIFO characters too)
         case (m)
             IM_NORM: begin k_l = p != 0; k_r = p != 0; end                    // no attributes: LTEN, RVV low
             IM_BYTE: begin                                                     // odd rows: the right byte only before WR fall
@@ -126,14 +126,21 @@ function [13:0] exp_out(input integer m, input integer r, input integer ln, inpu
                 k_l = p != 0; k_r = p != 0;
                 if (r == 2 || r == 4) e_cc = c == 0 ? nbyte(r, 0) : c == 1 ? nbyte(r, 2) : nbyte(r, c + 1);
                 if (r == 6) e_cc = c < 16 ? nbyte(6, 2 * c + 1) : nbyte(6, c + 16);              // 16 FIFO characters
-                if (r == 8) begin if (c < 17) k_cc = 1'b0; else e_cc = nbyte(8, c + 17); end   // FIFO overrun: CC open
+                // FIFO overrun: the 17th character overwrote the first ([D79] 1-176 "the first characters in the FIFO
+                // are written over and lost"): position 0 shows character 17, 1-15 characters 2-16; 16 open (wrap)
+                if (r == 8) begin
+                    if (c == 0) e_cc = nbyte(8, 33); else if (c < 16) e_cc = nbyte(8, 2 * c + 1);
+                    else if (c == 16) k_cc = 1'b0; else e_cc = nbyte(8, c + 17);
+                end
                 if (r == 10 && c >= 10) begin e_v = 1'b1; k_cc = 1'b0; k_l = 1'b0; k_r = 1'b0; end  // End of Row
                 e_l = ln == m_u && p >= 2 * m_nh + 1 && p < 4 * m_nh + 1;
                 e_r = p >= 4 * m_nh + 1;
             end
             IM_NT: begin
                 k_l = p != 0; k_r = p != 0;
-                if ((r == 2 || r == 4) && c == 1) begin e_v = 1'b1; k_cc = 1'b0; k_l = 1'b0; k_r = 1'b0; end
+                // the attribute position: blank (VSP), its own attributes not yet active ([D79] 1-176 Fig. 22): no
+                // LTEN at A0h (no field before it), no RVV at 90h; CC (S7) and LTEN at 90h (the U field before) open
+                if ((r == 2 || r == 4) && c == 1) begin e_v = 1'b1; k_cc = 1'b0; k_l = r == 2; end
                 e_l = ln == m_u && p >= 2 * m_nh + 2 && p < 4 * m_nh + 1;
                 e_r = p >= 4 * m_nh + 2;
             end
@@ -159,6 +166,7 @@ reg in_dma = 1'b0, c3_e = 1'b0, r3_pend = 1'b0, r3_seen = 1'b0;
 // frame windows: armed by the TB, on from the next VRTC fall for fw_nfr frames
 reg fw_arm = 1'b0, fw_on = 1'b0, fw_done = 1'b0, fw_disp = 1'b0, fw_cnt = 1'b0, fw_first = 1'b0, fw_inf = 1'b0;
 integer fw_rmin = 0, fw_nfr = 1, fw_k = 0, fw_mode = 0, fw_nw = 0, fw_ninf = 0, n_cc = 0, n_vsp = 0, n_lt = 0, n_rv = 0;
+integer n_stray = 0, fw_xstray = 0;    // WR pulses with DACK and CS high seen in the frame; fills that drive one
 reg [8*24-1:0] t_cnt = "frame dma", t_disp = "frame dma";
 // underrun (check 6)
 reg u_arm = 1'b0, u_stop = 1'b0;
@@ -221,6 +229,7 @@ endtask
 task close_window; begin
     if (w_fw) begin
         fw_nw = fw_nw + 1;
+        if (w_mode == IM_BYTE && w_e > 3) fw_xstray = fw_xstray + 1;
         if (w_tr != w_e) begin
             if (w_due) $sformat(msg, "%0s: during row %0d (the row %0d fill): %0d transfers, expected %0d", t_cnt, w_row, w_tgt, w_tr, w_e);
             else $sformat(msg, "%0s: during row %0d (no fill due): %0d transfers, expected 0", t_cnt, w_row, w_tr);
@@ -252,13 +261,17 @@ task close_window; begin
     end
 end endtask
 task fw_reset; begin
-    fw_nw = 0; fw_ninf = 0; n_cc = 0; n_vsp = 0; n_lt = 0; n_rv = 0;
+    fw_nw = 0; fw_ninf = 0; n_cc = 0; n_vsp = 0; n_lt = 0; n_rv = 0; n_stray = 0; fw_xstray = 0;
 end endtask
 // the counts of a frame of a frame window: every row fill, every checked display position
 task frame_counts;
     integer r, ln, c, xc, xv, xl, xr;
     reg [13:0] e;
     begin
+        if (n_stray != fw_xstray) begin
+            $sformat(msg, "%0s: %0d WR pulses with DACK and CS high in the frame, expected %0d (one per fill)", t_cnt, n_stray, fw_xstray);
+            err(msg);
+        end
         if (fw_cnt && fw_nw != m_nr + m_nv) begin
             $sformat(msg, "%0s: %0d row fills checked in the frame, expected %0d", t_cnt, fw_nw, m_nr + m_nv); err(msg);
         end
@@ -349,6 +362,7 @@ always @(posedge clk) begin
     end
     if (dr_ev && u_phase == 1) u_drq = u_drq + 1;
     // DMA WR (with DACK): CRT-22 DRQ low from WR fall + 2 clk to WR rise, high again within 2 clk of WR rise
+    if (wf_ev && dack_n === 1'b1 && cs_n === 1'b1 && fw_on) n_stray = n_stray + 1;
     if (wf_ev && dack_n === 1'b0) begin
         in_dma = 1'b1; d_wf_obs = nclk;
         if (w_c3) begin n3_wf = n3_wf + 1; c3_k = w_tr; c3_e = 1'b0; end
@@ -422,7 +436,10 @@ always @(posedge clk) begin
                     if (drq === 1'b1 && !u_stop) begin
                         s_k = w_tr; s_b = w_open ? mem(w_mode, w_tgt, s_k) : nbyte(0, s_k);
                         s_late = w_open && w_mode == IM_BYTE && w_tgt % 2 == 0;      // the right byte only in the last ce16
-                        s_early = w_open && w_mode == IM_BYTE && w_tgt % 2 == 1;     // the right byte only before WR fall
+                        // the right byte only before WR fall (the wrong one from the WR fall clk on): this catches a
+                        // model that latches before WR fall (at DACK fall); one that latches at WR fall shows the wrong
+                        // byte here as expected, so only the even rows catch a WR fall latch
+                        s_early = w_open && w_mode == IM_BYTE && w_tgt % 2 == 1;
                         s_stray = w_open && w_mode == IM_BYTE && s_k == 3;           // then a WR with DACK and CS high
                         dack_n <= 1'b0; dma_d <= s_late ? s_b ^ 8'h01 : s_b; dst = 2; dcnt = 0;
                     end else dst = 0;
@@ -575,7 +592,10 @@ initial begin
     while (n16 < hf_t + 12 * m_nh - 36) @(negedge clk);
     stat_chk(8'h00, 8'h02, "underrun", "3 CCLK before the row 6 start");
     `WAIT_UNTIL(u_phase == 1, 2 * LINE, "underrun: the row 6 start")
-    stat_chk(8'h02, 8'h02, "underrun", "at the row 6 start");
+    // DU stays set over row starts until a status read ([D79] 1-180): the first read after the row 8 start
+    `WAIT_UNTIL(w_open && w_row == 8, 3 * ROW, "underrun: row 8")
+    wait_n(LINE);
+    stat_chk(8'h02, 8'h02, "underrun", "after the row 8 start (set at the row 6 start, no read since)");
     stat_chk(8'h00, 8'h02, "underrun", "the status read after DU");
     // the next frame: rows 1-29 from the image (row 0 shows its buffer as left, S11); the frame after it: all rows
     t_cnt = "underrun"; t_disp = "underrun"; fw_disp = 1'b1; fw_cnt = 1'b1; fw_first = 1'b0; fw_inf = 1'b0;

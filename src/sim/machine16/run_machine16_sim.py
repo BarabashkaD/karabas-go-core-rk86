@@ -116,8 +116,8 @@ TESTS = {
                                 ('vg75_byte_on_wr_fall',
                                  'ERROR: vg75: byte: row 0 line 0 char 0: CC 21, expected 20 (CRT-23, [D79] 1-185)'),
                                 ('vg75_underrun_ignored',
-                                 'ERROR: vg75: underrun: at the row 6 start: status bit 1 (DU) 0, expected 1'
-                                 ' (CRT-25, [D79] 1-172, 1-180, S11)'),
+                                 'ERROR: vg75: underrun: VSP low at line 61 char 0, expected high from the row 6 start to the'
+                                 ' VRTC fall (CRT-25, [D79] 1-172, 1-180, S11)'),
                                 ('vg75_underrun_restart_early',
                                  'ERROR: vg75: underrun: 78 DRQ rises from the row 6 start to the VRTC fall, expected 0'
                                  ' (DMA stopped until after the vertical retrace) (CRT-25, [D79] 1-172, 1-180, S11)'),
@@ -126,7 +126,16 @@ TESTS = {
                                  ' (CRT-27, [D79] 1-165, 1-176)'),
                                 ('vg75_stop_dma_ignored',
                                  'ERROR: vg75: stop dma: during row 4 (the row 5 fill): 78 transfers, expected 12'
-                                 ' (CRT-26, [D79] 1-175)')]),
+                                 ' (CRT-26, [D79] 1-175)'),
+                                ('vg75_fifo_ptr_row_only',
+                                 'ERROR: vg75: fifo: row 2 line 1 char 1: CC 00, expected 24 (CRT-27, [D79] 1-165, 1-176)'),
+                                ('vg75_du_self_clear',
+                                 'ERROR: vg75: underrun: after the row 8 start (set at the row 6 start, no read since): status'
+                                 ' bit 1 (DU) 0, expected 1 (CRT-25, [D79] 1-172, 1-180, S11)'),
+                                ('vg75_attr_own_position',
+                                 'ERROR: vg75: non-transparent: row 2 line 9 char 1: LTEN 1, expected 0 (CRT-28, [D79] 1-176)'),
+                                ('vg75_fifo_overrun_keeps_first',
+                                 'ERROR: vg75: fifo: row 8 line 0 char 0: CC 29, expected 49 (CRT-27, [D79] 1-165, 1-176)')]),
 }  # the tasks that add testbenches add their entries
 
 

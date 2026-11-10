@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index f600ba3..fcfaa4a 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -161,7 +161,7 @@ task row_start(input [6:0] rn);
+         end else fa_row <= fa;
+         if (rn == 7'd0) begin ublank <= 1'b0; ustop <= 1'b0; end   // after the vertical retrace (S11)
+         t_ur = text_row(rn) && fill && !filled;        // SILENT S11: the moment of the underrun check
+-        if (t_ur) begin du <= 1'b1; ustop <= 1'b1; ublank <= 1'b1; end
++        if (t_ur) begin du <= 1'b1; ustop <= 1'b1; ublank <= 1'b1; end else du <= 1'b0;
+         if (text_row(rn)) dsel <= !dsel;
+         if ((rn == row_last || text_row(rn + 7'd1)) && dmae && !t_ur && (!ustop || rn == 7'd0)
+             && (rn == row_last || !fstop)) begin

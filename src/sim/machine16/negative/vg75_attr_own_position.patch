@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index f600ba3..c6fb7df 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -238,7 +238,7 @@ always @(posedge clk) begin
+                     if (t_code[1]) eos <= 1'b1; else eor <= 1'b1;
+                 end else if (t_code[7:6] == 2'b10) begin             // field attribute 10URGGBH
+                     fa <= t_code[5:0];
+-                    if (p_f) t_v = 1'b1;                             // non-transparent: a blank position (SILENT S7)
++                    if (p_f) begin t_v = 1'b1; t_l = t_code[5] && t_reg == 2'd1; t_r = t_code[4]; end                             // non-transparent: a blank position (SILENT S7)
+                     else begin                                       // transparent: the FIFO character
+                         t_cc = fifo_q; fr <= fr + 4'd1;
+                         t_v = t_code[1] && frame[4]; t_l = t_code[5] && t_reg == 2'd1;
