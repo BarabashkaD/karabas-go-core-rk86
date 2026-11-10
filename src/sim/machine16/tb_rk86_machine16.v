@@ -9,9 +9,15 @@
 // Frames (spec 7): counted as VRTC rises from the first VRTC rise after the 8275's VE rises (frame 0
 // starts there); the run ends FRAMES frames after the start of frame 0. The arming point (spec 8): the
 // second VRTC rise after the first clk with the 8257 mode A4h (arm, fa).
-// After the frames, a decoder sweep forces the CPU address over 0000-FFFF (reads, then writes; start-up
-// off, then on; AEN and the 8257 strobes forced inactive) and counts the selects of every range, so the
-// decoder edges (7FFF / 8000, 9FFF / A000, BFFF / C000, DFFF / E000) are checked whatever the boot does.
+// After the frames: RESET is pulsed for 200 ce16 (GLUE-9: it re-arms start-up; the boot checks run until
+// start-up ends again at the F836 read); then the end condition alone (GLUE-12): start-up is set by a
+// one-clk force and released, so the flip-flop itself holds it through reads with A15 = 0 (A14..A0 set),
+// an A15 address without DBIN and a write, and must end at a read with A15 = 1; then a decoder sweep
+// forces the CPU address over 0000-FFFF (reads, then writes; start-up off, then on; AEN and the 8257
+// strobes forced inactive) and counts the selects of every range, so the decoder edges (7FFF / 8000,
+// 9FFF / A000, BFFF / C000, DFFF / E000) are checked whatever the boot does; last, two passes with AEN
+// forced high and the 8257 address below 8000 while the CPU address sweeps 0000-FFFF: nothing answers
+// (the decoder takes the system address, GLUE-13). The forces are never released: the sweep stays last.
 // Plusargs: +bios=<hex, 2048 bytes> +font=<hex, 1024 bytes> ($readmemh; run_machine16_sim.py writes them).
 // Compile cpu_power_up.vh (the macro CPU16_ZERO) before this file.
 `default_nettype none
@@ -55,7 +61,7 @@ always @(posedge clk) font_data <= font[font_addr];        // latency 1 clk
 
 //---------------- errors
 integer errors = 0;
-integer phase = 0;                                         // 0 the boot; 1-4 the decoder sweep; 9 between
+integer phase = 0;     // 0 the boots; 5 the end condition; 1-4, 6-7 the decoder sweep; 9 between
 task fail; begin
     errors = errors + 1;
     if (errors >= 20) begin $display("FATAL: machine16: too many errors"); $finish; end
@@ -94,12 +100,12 @@ reg su_exp = 1'b1;
 always @(posedge clk) su_exp <= dut.clocks.reset | (su_exp & ~(dut.cpu.pin_dbin & dut.cpu.pin_a[15]));
 
 //---------------- the sample counts (no vacuous pass); [phase]
-integer c_ppa [0:4], c_crt [0:4], c_dma [0:4], c_wer [0:4], c_rdr [0:4], c_rom [0:4];
-integer c_din_mem [0:4], c_din_ppa [0:4], c_din_ext [0:4], c_din_crt [0:4];
+integer c_ppa [0:7], c_crt [0:7], c_dma [0:7], c_wer [0:7], c_rdr [0:7], c_rom [0:7], c_n [0:7];
+integer c_din_mem [0:7], c_din_ppa [0:7], c_din_ext [0:7], c_din_crt [0:7];
 integer c_su = 0, c_su_rd = 0, c_su_low = 0, su_ends = 0, c_dma_a = 0, c_dma_rd = 0, c_dma_wr = 0;
 integer c_cpu_crt_wr = 0, c_cpu_crt_rd = 0, c_rom_high = 0, k0;
-initial for (k0 = 0; k0 < 5; k0 = k0 + 1) begin
-    c_ppa[k0] = 0; c_crt[k0] = 0; c_dma[k0] = 0; c_wer[k0] = 0; c_rdr[k0] = 0; c_rom[k0] = 0;
+initial for (k0 = 0; k0 < 8; k0 = k0 + 1) begin
+    c_n[k0] = 0; c_ppa[k0] = 0; c_crt[k0] = 0; c_dma[k0] = 0; c_wer[k0] = 0; c_rdr[k0] = 0; c_rom[k0] = 0;
     c_din_mem[k0] = 0; c_din_ppa[k0] = 0; c_din_ext[k0] = 0; c_din_crt[k0] = 0;
 end
 reg su_q = 1'b1;
@@ -109,10 +115,12 @@ reg [7:0] x_din;
 always @(negedge clk) begin
     // start-up (GLUE-11, GLUE-12; the controller's ruling): the monitor answers every address, the
     // decoder is off
-    if (phase == 0) begin
+    if (phase == 0 || phase == 5) begin
         if (dut.startup !== su_exp)
-            gerr(su_exp ? "start-up ended before the first read with A15 = 1"
-                        : "start-up not ended by the first read with A15 = 1");
+            gerr(!su_exp ? "start-up not ended by the first read with A15 = 1"
+                 : dut.clocks.reset ? "start-up not set by RESET" : "start-up ended before the first read with A15 = 1");
+    end
+    if (phase == 0) begin
         if (su_q && !su_exp) su_ends = su_ends + 1;
         su_q = su_exp;
         if (su_exp && !dut.clocks.reset) begin
@@ -132,7 +140,7 @@ always @(negedge clk) begin
     // GLUE-13: no device answers a DMA address; the memory gives RAM (rom low)
     if (dut.dma.aen) begin
         if (dut.dma.a_o < 16'h8000) begin
-            if (phase < 5) c_dma_a = c_dma_a + 1;
+            if (phase == 0) c_dma_a = c_dma_a + 1;
             if (!dut.ppa.cs_n || !dut.crt.cs_n || !dut.dma.cs_n || !dut.ext_we_n || !dut.ext_rd_n)
                 gerr("a device selected by the DMA address");
         end
@@ -211,7 +219,8 @@ always @(negedge clk) begin
     if (dut.font_addr !== dut.video.font_addr || dut.video.font_data !== font_data || dut.pix !== dut.video.pix)
         gerr("font, pix: not the video path");
     // the counts
-    if (phase < 5) begin
+    if (phase < 8 && phase != 5) begin
+        c_n[phase] = c_n[phase] + 1;
         if (!dut.ppa.cs_n) c_ppa[phase] = c_ppa[phase] + 1;
         if (!dut.crt.cs_n) c_crt[phase] = c_crt[phase] + 1;
         if (!dut.dma.cs_n) c_dma[phase] = c_dma[phase] + 1;
@@ -284,22 +293,42 @@ always @(negedge clk)
     end
 
 //---------------- the decoder sweep: every address, reads and writes, start-up off and on
-reg [15:0] sw_a = 16'h0000;
-reg sw_su = 1'b0, sw_rd = 1'b1;
+reg [15:0] sw_a = 16'h0000, sw_dma = 16'h0000;
+reg sw_su = 1'b0, sw_rd = 1'b1, sw_wr_n = 1'b1;
 task sweep(input integer ph, input su, input rd);
     integer k;
     begin
         @(posedge clk);
-        phase = 9; sw_su = su; sw_rd = rd;
+        phase = 9; sw_su = su; sw_rd = rd; sw_wr_n = rd;
         @(posedge clk);
         for (k = 0; k < 65536; k = k + 1) begin
-            sw_a = k; phase = ph;
+            sw_a = k; sw_dma = {1'b0, ~k[14:0]}; phase = ph;
             @(posedge clk);
         end
         phase = 9;
     end
 endtask
-task expect_count(input [8*40-1:0] what, input integer got, input integer exp); begin
+// the end condition of start-up (GLUE-12): one access by the forced CPU pins, held 4 clk, then idle; the
+// flip-flop (not forced) must hold start-up or end it
+integer c_end = 0;
+task su_step(input [15:0] a, input rd, input wr, input exp);
+    begin
+        sw_a = a; sw_rd = rd; sw_wr_n = !wr;
+        repeat (4) @(posedge clk);
+        sw_rd = 1'b0; sw_wr_n = 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        c_end = c_end + 1;
+        if (dut.startup !== exp) begin
+            $display("ERROR: glue: start-up end condition: after a %0s at %h (A15 = %b): start-up %b, expected %b",
+                     rd ? "read" : wr ? "write" : "no access", a, a[15], dut.startup, exp);
+            fail;
+        end
+        @(posedge clk);
+    end
+endtask
+integer t0;
+task expect_count(input [8*56-1:0] what, input integer got, input integer exp); begin
     if (got != exp) begin $display("ERROR: sweep: %0s: %0d samples, expected %0d", what, got, exp); fail; end
 end endtask
 task expect_seen(input [8*56-1:0] what, input integer got); begin
@@ -309,17 +338,64 @@ end endtask
 initial begin
     wait (done);
     if (!timeout) begin
+        // GLUE-9, GLUE-12: RESET re-arms start-up; the boot checks (phase 0) run until it ends again
+        @(posedge clk); reset <= 1'b1;
+        t0 = n16;
+        while (n16 < t0 + 200) @(posedge clk);
+        reset <= 1'b0;
+        t0 = n16;
+        while (su_ends < 2 && n16 < t0 + 5000) @(posedge clk);
+        if (su_ends < 2) begin
+            $display("ERROR: glue: start-up did not end after the second reset (no read with A15 = 1 in 5000 ce16)"); fail;
+        end else $display("INFO: machine16: start-up re-armed by RESET, ended again at ce16 %0d", n16);
+        t0 = n16;
+        while (n16 < t0 + 2000) @(posedge clk);
+        // GLUE-12: the end condition alone; start-up set for one clk by a force on the flip-flop (and on the
+        // TB's copy), then released, so the flip-flop itself holds it
+        @(posedge clk);
+        phase = 9;
+        sw_a = 16'h0000; sw_rd = 1'b0; sw_wr_n = 1'b1;
         force dut.dma.aen = 1'b0;
         force dut.dma.memw_n = 1'b1;
         force dut.dma.ior_n_o = 1'b1;
-        force dut.startup = sw_su;
         force dut.cpu.a = sw_a;
         force dut.cpu.dbin_pin = sw_rd;
-        force dut.cpu.wr_n = sw_rd;
+        force dut.cpu.wr_n = sw_wr_n;
+        force dut.startup = 1'b1;
+        force su_exp = 1'b1;
+        repeat (2) @(posedge clk);
+        release dut.startup;
+        release su_exp;
+        phase = 5;
+        su_step(16'h0000, 1'b1, 1'b0, 1'b1);
+        su_step(16'h0001, 1'b1, 1'b0, 1'b1);
+        su_step(16'h4000, 1'b1, 1'b0, 1'b1);
+        su_step(16'h2000, 1'b1, 1'b0, 1'b1);
+        su_step(16'h1000, 1'b1, 1'b0, 1'b1);
+        su_step(16'h0800, 1'b1, 1'b0, 1'b1);
+        su_step(16'h6000, 1'b1, 1'b0, 1'b1);
+        su_step(16'h7FFF, 1'b1, 1'b0, 1'b1);
+        su_step(16'hFFFF, 1'b0, 1'b0, 1'b1);     // A15 without DBIN
+        su_step(16'hFFFF, 1'b0, 1'b1, 1'b1);     // a write with A15 = 1
+        su_step(16'h8000, 1'b1, 1'b0, 1'b0);     // a read with A15 = 1 ends it
+        expect_count("start-up end condition steps", c_end, 11);
+        // the decoder sweep (forces never released)
+        phase = 9;
+        force dut.startup = sw_su;
         sweep(1, 1'b0, 1'b1);
         sweep(2, 1'b0, 1'b0);
         sweep(3, 1'b1, 1'b1);
         sweep(4, 1'b1, 1'b0);
+        // GLUE-13: AEN high with the 8257 address below 8000, the CPU address over 0000-FFFF
+        force dut.dma.a_o = sw_dma;
+        force dut.dma.aen = 1'b1;
+        sweep(6, 1'b0, 1'b1);
+        sweep(7, 1'b0, 1'b0);
+        expect_count("DMA address: samples, reads", c_n[6], 65536);
+        expect_count("DMA address: samples, writes", c_n[7], 65536);
+        expect_count("DMA address: CS", c_ppa[6] + c_crt[6] + c_dma[6] + c_ppa[7] + c_crt[7] + c_dma[7], 0);
+        expect_count("DMA address: window strobes", c_rdr[6] + c_wer[6] + c_rdr[7] + c_wer[7], 0);
+        expect_count("DMA address: rom", c_rom[6] + c_rom[7], 0);
         // GLUE-1: 8 KB each; start-up: none, the monitor at every address
         expect_count("8255 CS, reads", c_ppa[1], 8192);     expect_count("8255 CS, writes", c_ppa[2], 8192);
         expect_count("8275 CS, reads", c_crt[1], 8192);     expect_count("8275 CS, writes", c_crt[2], 8192);
@@ -341,7 +417,7 @@ initial begin
         expect_seen("start-up after the reset", c_su);
         expect_seen("start-up reads below 8000 (the monitor at 0000)", c_su_low);
         expect_seen("rom high in start-up", c_rom_high);
-        expect_count("start-up ends", su_ends, 1);
+        expect_count("start-up ends (power-up, the RESET pulse)", su_ends, 2);
         expect_seen("the 8255 selected", c_ppa[0]);
         expect_seen("the 8275 selected", c_crt[0]);
         expect_seen("the 8257 selected", c_dma[0]);
