@@ -218,6 +218,18 @@ initial begin
     wr(2'd3, 8'h05); chk(pc_o[0] == 1'b1 && pc_o[3] == 1'b0, "mode 2 + b mode 1: intr b");
     rd(2'd2, v); chk(v == 8'h87, "mode 2 + b mode 1: status word");
     rd(2'd1, v); chk(v == 8'h5B && pc_o[1] == 1'b0, "mode 2 + b mode 1: port B");
+    // PPI-1 RESET from a state that differs from it ([C78] 12-78 RESET: the control register cleared, every port an
+    // input): C6h (mode 2, B mode 1 input) with INTE B, then OBF A (port A written) and INTE 1 (0Dh); a 2-clk pulse
+    wr(2'd0, 8'h77); wr(2'd3, 8'h0D);
+    chk(pc_oe == 8'hAB && pc_o[7] == 1'b0 && pa_o == 8'h77, "reset: setup (mode 2, obf a, latch a)");
+    @(negedge clk) reset = 1'b1; repeat (2) @(negedge clk); reset = 1'b0; repeat (2) @(negedge clk);
+    chk(!pa_oe && !pb_oe && pc_oe == 8'h00, "reset: ports not inputs after a RESET pulse");
+    chk(pa_o == 8'h00 && pb_o == 8'h00 && pc_o == 8'h00, "reset: output latches not cleared");
+    pa_i = 8'h3C; pb_i = 8'hC3; pc_i = 8'h5A;
+    rd(2'd0, v); chk(v == 8'h3C, "reset: port A read not the pins (mode 0)");
+    rd(2'd1, v); chk(v == 8'hC3, "reset: port B read not the pins (mode 0)");
+    rd(2'd2, v); chk(v == 8'h5A, "reset: port C read not the pins (mode 0)");
+    pc_i = 8'hFF;
     // PPI-10 the RK86 control words: 8Ah keyboard (A out, B in, C upper in, C lower out); 90h ROM disk
     wr(2'd3, 8'h8A); chk(pa_oe && !pb_oe && pc_oe == 8'h0F, "rk86 word 8Ah");
     wr(2'd3, 8'h90); chk(!pa_oe && pb_oe && pc_oe == 8'hFF, "rk86 word 90h");
@@ -225,3 +237,4 @@ initial begin
     $finish;
 end
 endmodule
+`default_nettype wire

@@ -4,6 +4,7 @@
 // by their group's direction bit, port C byte writes to the output bits only; RD / WR with CS and the
 // port's A1 A0. Pins: *_i is the level the board drives, *_o / *_oe what the chip drives. A write
 // completes on WR↑ with the address and data held while WR was low.
+// New for the 16 MHz machine (karabas-go-core-rk86, rk86_16/); modified BSD license, see ../../LICENSE.TXT.
 `default_nettype none
 module k580vv55(
     input  wire       clk,

@@ -10,8 +10,8 @@
 // An open implementation of K580VT57 DMA controller
 //
 // Author: Dmitry Tselikov   http://bashkiria-2m.narod.ru/
-// Modifications: Sorgelig (MiSTer-devel/Apogee_MiSTer rtl/k580vt57.v at
-// 4b37da252517ceae3306a56a9eef08290259b098).
+// Base: MiSTer-devel/Apogee_MiSTer rtl/k580vt57.v at 4b37da252517ceae3306a56a9eef08290259b098
+// (Dmitry Tselikov's file as published there).
 // Rewritten to the Intel 8257 data sheet ([C78] 12-98..12-110) for the Radio-86RK 16 MHz machine
 // (karabas-go-core-rk86, rk86_16/); kept from the base: the register write decoding by {F/L, A3-A0}.
 //   - the states SI, S0, S1, S2, S3, SW, S4 of Fig. 6 on both clock edges: states, DACK, AEN↑, IOR↑ / MEMR↑

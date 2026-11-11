@@ -1,0 +1,316 @@
+From 9cdd022ce2fc6f56b52a6e90aa8083c2d5de02e2 Mon Sep 17 00:00:00 2001
+From: Dmitry Veremeev <6252647+BarabashkaD@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 01:40:15 +0200
+Subject: [PATCH] rk86_16: vt57 SI request state before S0 (Fig. 6 note 1;
+ review M9, for decision)
+
+The theta-down that sees a DRQ keeps the 8257 in SI with HRQ set at the next
+theta-up; S0 follows one theta-down later ([C78] 12-104 Fig. 6 note 1, the
+12-110 waveform). The first HLDA sample moves from 9 to 18 ce16 after the
+DRQ sample; with the 8080 every pin edge is unchanged (S1 27 after the
+sample, HRQ up 4 after it).
+
+tb_vt57_func check 20 'si hrq': HLDA held high before DRQ0, HRQ 4 and S1
+18 after the DRQ sample. New fault vt57f_si_to_s0_at_sample (S0 at the
+sample). Regenerated for the new context: vt57_one_edge, vt57_s0_no_hlda
+(now 'latency 18'), vt57_hrq_late (the extra sample in req),
+vt57f_s0_no_return, vt57f_autoload_early.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/rtl/rk86_16/k580vt57.v                    | 13 ++++++-
+ .../machine16/negative/vt57_hrq_late.patch    | 21 +++++-----
+ .../machine16/negative/vt57_one_edge.patch    |  6 +--
+ .../machine16/negative/vt57_s0_no_hlda.patch  |  6 +--
+ .../negative/vt57f_autoload_early.patch       |  6 +--
+ .../negative/vt57f_s0_no_return.patch         |  6 +--
+ .../negative/vt57f_si_to_s0_at_sample.patch   | 13 +++++++
+ src/sim/machine16/run_machine16_sim.py        |  7 +++-
+ src/sim/machine16/tb_vt57_func.v              | 39 ++++++++++++++++---
+ 9 files changed, 86 insertions(+), 31 deletions(-)
+ create mode 100644 src/sim/machine16/negative/vt57f_si_to_s0_at_sample.patch
+
+diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+index 1df2e12..7fa3846 100644
+--- a/src/rtl/rk86_16/k580vt57.v
++++ b/src/rtl/rk86_16/k580vt57.v
+@@ -20,6 +20,10 @@
+ //   - at the θ↓ that starts S4: DRQ and HLDA → S1 after S4; otherwise (no DRQ, or HLDA lost) HRQ↓ at
+ //     θ↑(S4) and SI after S4 (Fig. 6); with DRQ still active SI → S0 raises HRQ again ([C78] 12-105,
+ //     12-110 "control override sequence")
++//   - SI → S0 (review 2026-11-11, M9): the θ↓ that sees a DRQ keeps the 8257 in SI and HRQ rises at the next θ↑;
++//     S0 follows at the next θ↓ ([C78] 12-104 Fig. 6 note 1 "HRQ is set if DRQn is active", the SI → S0 arc
++//     on HRQ; the 12-110 waveform: SI, SI with HRQ↑, S0, S1), so the first HLDA sample is 18 ce16 after the
++//     DRQ sample
+ //   - verify / write / read cycles; extended write (mode bit 5): MEMW / IOW from θ↑(S2)
+ //   - READY sampled at θ↑ of S3 and SW: wait states SW (not in verify cycles)
+ //   - four channels, fixed or rotating priority, TC stop, autoload with the update flag (set with TC↑,
+@@ -55,6 +59,7 @@ module k580vt57(
+ );
+ localparam [2:0] SI = 3'd0, S0 = 3'd1, S1 = 3'd2, S2 = 3'd3, S3 = 3'd4, SW = 3'd5, S4 = 3'd6;
+ reg  [2:0] state = SI;
++reg        req = 1'b0;             // in SI: a DRQ seen at the last θ↓ (HRQ set in SI, Fig. 6 note 1)
+ reg  [7:0] mode = 8'h00;           // AL TCS EW RP EN3 EN2 EN1 EN0
+ reg [15:0] ad [0:3];               // DMA address registers
+ reg [15:0] tr [0:3];               // terminal count registers: 15:14 the cycle, 13:0 N - 1
+@@ -150,7 +155,7 @@ always @(posedge clk) begin
+         //---------------- θ↓: the states, DACK, AEN↑, IOR↑ / MEMR↑, the DRQ / HLDA / READY decisions
+         if (th_dn) begin
+             case (state)
+-                SI: if (p[2]) state <= S0;                                // DMA-16: pin-equivalent label
++                SI: if (req) state <= S0;                                 // Fig. 6 note 1: one θ↓ after the sample
+                 S0: if (!p[2]) state <= SI;                               // SILENT: DMA-16
+                     else if (hlda) begin
+                         state <= S1; ch <= p[1:0]; aen <= 1'b1;
+@@ -195,6 +200,7 @@ always @(posedge clk) begin
+             if (state == S3 && tc_now) tcs[ch] <= 1'b1;
+             if (state == S3 && tc_now && mode[7] && ch == 2'd2) begin upd <= 1'b1; reload <= 1'b1; end  // with TC↑ (DMA-24)
+             if (state == S3 || state == SW) rdy <= ready;
++            if (state == SI && req) hrq <= 1'b1;                                      // Fig. 6 note 1: HRQ set in SI
+         end
+         if (upd_now) begin
+             done <= 1'b0;
+@@ -208,5 +214,10 @@ always @(posedge clk) begin
+         end
+     end
+ end
++// the DRQ sample of SI ([C78] 12-104 Fig. 6 note 1, 12-109 TQS): set at a θ↓ in SI that sees a request, so SI → S0 one
++// θ↓ later; cleared at every other θ↓ (S0 → SI with no DRQ, S4 → SI: the next SI samples again)
++always @(posedge clk)
++    if (reset) req <= 1'b0;
++    else if (th_dn) req <= state == SI && p[2];
+ endmodule
+ `default_nettype wire
+diff --git a/src/sim/machine16/negative/vt57_hrq_late.patch b/src/sim/machine16/negative/vt57_hrq_late.patch
+index 1cc1c25..4d9d7bf 100644
+--- a/src/sim/machine16/negative/vt57_hrq_late.patch
++++ b/src/sim/machine16/negative/vt57_hrq_late.patch
+@@ -1,8 +1,8 @@
+ diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+-index 1df2e12..99405ef 100644
++index 7fa3846..9be6937 100644
+ --- a/src/rtl/rk86_16/k580vt57.v
+ +++ b/src/rtl/rk86_16/k580vt57.v
+-@@ -72,6 +72,7 @@ reg        dack_on = 1'b0;
++@@ -77,6 +77,7 @@ reg        dack_on = 1'b0;
+  reg        done = 1'b0, done_tc = 1'b0, done_upd = 1'b0;
+  reg  [1:0] done_ch = 2'd0;
+  reg [15:0] done_a = 16'h0000;      // the address of the transfer that ended at the last S4
+@@ -10,12 +10,11 @@ index 1df2e12..99405ef 100644
+  reg        iow_q = 1'b1, ior_q = 1'b1, w_cs = 1'b0, r_cs = 1'b0;
+  reg  [3:0] w_a = 4'd0, r_a = 4'd0;
+  reg  [7:0] w_d = 8'h00;
+-@@ -150,7 +151,7 @@ always @(posedge clk) begin
+-         //---------------- θ↓: the states, DACK, AEN↑, IOR↑ / MEMR↑, the DRQ / HLDA / READY decisions
+-         if (th_dn) begin
+-             case (state)
+--                SI: if (p[2]) state <= S0;                                // DMA-16: pin-equivalent label
+-+                SI: begin if (p[2] && seen) state <= S0; seen <= p[2]; end // DMA-16: pin-equivalent label
+-                 S0: if (!p[2]) state <= SI;                               // SILENT: DMA-16
+-                     else if (hlda) begin
+-                         state <= S1; ch <= p[1:0]; aen <= 1'b1;
++@@ -218,6 +219,6 @@ end
++ // θ↓ later; cleared at every other θ↓ (S0 → SI with no DRQ, S4 → SI: the next SI samples again)
++ always @(posedge clk)
++     if (reset) req <= 1'b0;
++-    else if (th_dn) req <= state == SI && p[2];
+++    else if (th_dn) begin req <= state == SI && p[2] && seen; seen <= state == SI && p[2]; end
++ endmodule
++ `default_nettype wire
+diff --git a/src/sim/machine16/negative/vt57_one_edge.patch b/src/sim/machine16/negative/vt57_one_edge.patch
+index f5f52d9..e4b9a1c 100644
+--- a/src/sim/machine16/negative/vt57_one_edge.patch
++++ b/src/sim/machine16/negative/vt57_one_edge.patch
+@@ -1,13 +1,13 @@
+ diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+-index cb411ee..6275c99 100644
++index 7fa3846..3173d8d 100644
+ --- a/src/rtl/rk86_16/k580vt57.v
+ +++ b/src/rtl/rk86_16/k580vt57.v
+-@@ -145,7 +145,7 @@ always @(posedge clk) begin
++@@ -153,7 +153,7 @@ always @(posedge clk) begin
+              if (r_a[3]) tcs <= 4'd0; else ff <= !ff;
+          end
+          //---------------- θ↓: the states, DACK, AEN↑, IOR↑ / MEMR↑, the DRQ / HLDA / READY decisions
+ -        if (th_dn) begin
+ +        if (th_up) begin
+              case (state)
+-                 SI: if (p[2]) state <= S0;                                // DMA-16: pin-equivalent label
++                 SI: if (req) state <= S0;                                 // Fig. 6 note 1: one θ↓ after the sample
+                  S0: if (!p[2]) state <= SI;                               // SILENT: DMA-16
+diff --git a/src/sim/machine16/negative/vt57_s0_no_hlda.patch b/src/sim/machine16/negative/vt57_s0_no_hlda.patch
+index f9d308a..f637efa 100644
+--- a/src/sim/machine16/negative/vt57_s0_no_hlda.patch
++++ b/src/sim/machine16/negative/vt57_s0_no_hlda.patch
+@@ -1,10 +1,10 @@
+ diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+-index 1df2e12..304bed9 100644
++index 7fa3846..69aea49 100644
+ --- a/src/rtl/rk86_16/k580vt57.v
+ +++ b/src/rtl/rk86_16/k580vt57.v
+-@@ -152,7 +152,7 @@ always @(posedge clk) begin
++@@ -157,7 +157,7 @@ always @(posedge clk) begin
+              case (state)
+-                 SI: if (p[2]) state <= S0;                                // DMA-16: pin-equivalent label
++                 SI: if (req) state <= S0;                                 // Fig. 6 note 1: one θ↓ after the sample
+                  S0: if (!p[2]) state <= SI;                               // SILENT: DMA-16
+ -                    else if (hlda) begin
+ +                    else begin
+diff --git a/src/sim/machine16/negative/vt57f_autoload_early.patch b/src/sim/machine16/negative/vt57f_autoload_early.patch
+index a20a014..2a30e27 100644
+--- a/src/sim/machine16/negative/vt57f_autoload_early.patch
++++ b/src/sim/machine16/negative/vt57f_autoload_early.patch
+@@ -1,13 +1,13 @@
+ diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+-index 1df2e12..d4a8f3e 100644
++index 7fa3846..90cee89 100644
+ --- a/src/rtl/rk86_16/k580vt57.v
+ +++ b/src/rtl/rk86_16/k580vt57.v
+-@@ -193,7 +193,7 @@ always @(posedge clk) begin
++@@ -198,7 +198,7 @@ always @(posedge clk) begin
+              tc <= (state == S3 || state == SW) && tc_now;
+              mark <= (state == S3 || state == SW) && cnt[6:0] == 7'd0;                // DMA-11: the TC window
+              if (state == S3 && tc_now) tcs[ch] <= 1'b1;
+ -            if (state == S3 && tc_now && mode[7] && ch == 2'd2) begin upd <= 1'b1; reload <= 1'b1; end  // with TC↑ (DMA-24)
+ +            if (state == S3 && tc_now && mode[7] && ch == 2'd2) begin upd <= 1'b1; ad[2] <= ad[3]; tr[2] <= tr[3]; end  // with TC↑ (DMA-24)
+              if (state == S3 || state == SW) rdy <= ready;
++             if (state == SI && req) hrq <= 1'b1;                                      // Fig. 6 note 1: HRQ set in SI
+          end
+-         if (upd_now) begin
+diff --git a/src/sim/machine16/negative/vt57f_s0_no_return.patch b/src/sim/machine16/negative/vt57f_s0_no_return.patch
+index 60adb4d..39b7295 100644
+--- a/src/sim/machine16/negative/vt57f_s0_no_return.patch
++++ b/src/sim/machine16/negative/vt57f_s0_no_return.patch
+@@ -1,11 +1,11 @@
+ diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
+-index 1df2e12..7f81aa1 100644
++index 7fa3846..b34daaf 100644
+ --- a/src/rtl/rk86_16/k580vt57.v
+ +++ b/src/rtl/rk86_16/k580vt57.v
+-@@ -151,7 +151,7 @@ always @(posedge clk) begin
++@@ -156,7 +156,7 @@ always @(posedge clk) begin
+          if (th_dn) begin
+              case (state)
+-                 SI: if (p[2]) state <= S0;                                // DMA-16: pin-equivalent label
++                 SI: if (req) state <= S0;                                 // Fig. 6 note 1: one θ↓ after the sample
+ -                S0: if (!p[2]) state <= SI;                               // SILENT: DMA-16
+ +                S0: if (1'b0) state <= SI;                               // SILENT: DMA-16
+                      else if (hlda) begin
+diff --git a/src/sim/machine16/negative/vt57f_si_to_s0_at_sample.patch b/src/sim/machine16/negative/vt57f_si_to_s0_at_sample.patch
+new file mode 100644
+index 0000000..353f80c
+--- /dev/null
++++ b/src/sim/machine16/negative/vt57f_si_to_s0_at_sample.patch
+@@ -0,0 +1,13 @@
++diff --git a/src/rtl/rk86_16/k580vt57.v b/src/rtl/rk86_16/k580vt57.v
++index 7fa3846..9f6a786 100644
++--- a/src/rtl/rk86_16/k580vt57.v
+++++ b/src/rtl/rk86_16/k580vt57.v
++@@ -155,7 +155,7 @@ always @(posedge clk) begin
++         //---------------- θ↓: the states, DACK, AEN↑, IOR↑ / MEMR↑, the DRQ / HLDA / READY decisions
++         if (th_dn) begin
++             case (state)
++-                SI: if (req) state <= S0;                                 // Fig. 6 note 1: one θ↓ after the sample
+++                SI: if (p[2]) state <= S0;                                // Fig. 6 note 1: one θ↓ after the sample
++                 S0: if (!p[2]) state <= SI;                               // SILENT: DMA-16
++                     else if (hlda) begin
++                         state <= S1; ch <= p[1:0]; aen <= 1'b1;
+diff --git a/src/sim/machine16/run_machine16_sim.py b/src/sim/machine16/run_machine16_sim.py
+index 47886e1..0053405 100644
+--- a/src/sim/machine16/run_machine16_sim.py
++++ b/src/sim/machine16/run_machine16_sim.py
+@@ -69,7 +69,8 @@ TESTS = {
+                             ('vt57_no_ext_write', 'ERROR: vt57: memw at 13 (transfer 0)'),
+                             ('vt57_no_autoload_copy', 'ERROR: vt57: address at 0 (transfer 2340)'),
+                             ('vt57_cycle_bits_swapped', 'ERROR: vt57: ior at 13 (transfer 0)'),
+-                            ('vt57_s0_no_hlda', 'ERROR: vt57: latency 9 (transfer 0)'),
++                            # M9 (SI → S0 one θ↓ after the DRQ sample): S1 at the θ↓ that ends S0, 18 after it
++                            ('vt57_s0_no_hlda', 'ERROR: vt57: latency 18 (transfer 0)'),
+                             ('vt57_adstb_long', 'ERROR: vt57: adstb at 13 (transfer 0)'),
+                             ('vt57_ior_end_s4', 'ERROR: vt57: ior at 31 (transfer 0)'),
+                             ('vt57_memw_end_late', 'ERROR: vt57: memw at 31 (transfer 0)'),
+@@ -99,7 +100,9 @@ TESTS = {
+                                  ('vt57f_reload_any_channel', 'ERROR: vt57f: autoload'),
+                                  # the 8257 data sheet review of 2026-11-11 (merged.md A3, A13)
+                                  ('vt57f_enable_ignored', 'ERROR: vt57f: enables: DACK of a disabled channel'),
+-                                 ('vt57f_cs_in_master', 'ERROR: vt57f: cs: no DACK0 after a mode write in S2')]),
++                                 ('vt57f_cs_in_master', 'ERROR: vt57f: cs: no DACK0 after a mode write in S2'),
++                                 # review M9 (A1): S0 entered at the DRQ sample, S1 with HLDA high 9 after it
++                                 ('vt57f_si_to_s0_at_sample', 'ERROR: vt57f: si hrq: AEN (S1) 9 after the DRQ sample')]),
+     'vg75': dict(top='tb_vg75', files=['src/sim/machine16/tb_vg75.v', 'src/rtl/rk86_16/k580vg75.v'],
+                  negatives=[('vg75_hrtc_7', 'ERROR: vg75: hrtc: power-up: HRTC high 12 ce16, expected 24'),
+                             ('vg75_vrtc_short', 'ERROR: vg75: vrtc: power-up: 0 VRTC rises in 720 ce16, expected 10'),
+diff --git a/src/sim/machine16/tb_vt57_func.v b/src/sim/machine16/tb_vt57_func.v
+index 6582c49..5d4bc68 100644
+--- a/src/sim/machine16/tb_vt57_func.v
++++ b/src/sim/machine16/tb_vt57_func.v
+@@ -23,7 +23,7 @@ reg reset = 1'b1, cs_n = 1'b1, ior_n = 1'b1, iow_n = 1'b1, ready = 1'b1;
+ reg [3:0] a = 4'd0;
+ reg [7:0] d = 8'h00;
+ reg [3:0] drq = 4'd0;
+-reg hold_s = 1'b0, hlda = 1'b0, hlda_off = 1'b0;
++reg hold_s = 1'b0, hlda = 1'b0, hlda_off = 1'b0, hlda_on = 1'b0;
+ wire [7:0] d_o;
+ wire [3:0] dack_n;
+ wire [15:0] a_o;
+@@ -32,10 +32,11 @@ k580vt57 dut(.clk(clk), .th_up(f2), .th_dn(f2_fall), .reset(reset), .cs_n(cs_n),
+     .a_i(a), .d_i(d), .d_o(d_o), .drq(drq), .hlda(hlda), .ready(ready), .hrq(hrq), .dack_n(dack_n),
+     .a_o(a_o), .aen(aen), .adstb(adstb), .memr_n(memr_n), .memw_n(memw_n), .ior_n_o(ior_n_o), .iow_n_o(iow_n_o),
+     .tc(tc), .mark(mark));
+-// the 8080 of tb_vt57.v: HOLD sampled at Φ2↑, HLDA at the next Φ1↑; hlda_off holds HLDA low (DMA-15, DMA-16)
++// the 8080 of tb_vt57.v: HOLD sampled at Φ2↑, HLDA at the next Φ1↑; hlda_off holds HLDA low (DMA-15, DMA-16),
++// hlda_on holds it high (check 20)
+ always @(posedge clk) begin
+     if (f2) hold_s <= hrq;
+-    if (f1) hlda <= hold_s && !hlda_off;
++    if (f1) hlda <= (hold_s || hlda_on) && !hlda_off;
+ end
+ // the requesters: rmode[c] 0 held, 1 per strobe; ctype[c] the cycle type programmed for channel c
+ // (count bits 15:14); left[c] the transfers still to request
+@@ -79,9 +80,12 @@ reg adstb_q = 1'b0;
+ // HRQ, A15-A0}
+ localparam HB = 18;
+ reg [31:0] hist [0:(1 << HB) - 1];
+-integer quiet = 0, holds = 0, hrq_up = -1000, hlda_up = -1000, rdy_hi = -1, rdy_t0 = 0;
+-reg hrq_q = 1'b0, hlda_q = 1'b0;
++integer quiet = 0, holds = 0, hrq_up = -1000, hlda_up = -1000, rdy_hi = -1, rdy_t0 = 0, samp0 = -1000;
++reg hrq_q = 1'b0, hlda_q = 1'b0, drq0_seen = 1'b0;
+ always @(posedge clk) if (ce16) begin
++    // check 20: the DRQ sample, the first θ↓ that sees DRQ0 high after it rose (as tb_vt57's latency anchor)
++    if (!drq[0]) drq0_seen = 1'b0;
++    if (f2_fall && drq[0] && !drq0_seen) begin samp0 = n16; drq0_seen = 1'b1; end
+     if (adstb && !adstb_q) s1 = n16 - 5;
+     rel = n16 - s1 - 1;
+     if (rel == 10) begin
+@@ -696,6 +700,31 @@ initial begin
+     wait_idle;
+     run_ch(2, 0, 1'b1);
+ 
++    // 20. M9 (review 2026-11-11): the state after the DRQ sample is SI with HRQ set, S0 one θ↓ later ([C78] 12-104
++    // Fig. 6 note 1 "HRQ is set if DRQn is active", the SI → S0 arc on HRQ; 12-110: SI, SI with HRQ↑, S0, S1). With
++    // HLDA already high: HRQ↑ 4 ce16 after the DRQ sample, S0 at + 9, the first HLDA sample at its end, S1 (AEN↑) at
++    // + 18, not at + 9
++    part("si hrq", "M9, [C78] 12-104 Fig. 6 note 1, 12-110");
++    mode_set(8'h01);
++    prog(0, 16'h1A00, 16'h4000);
++    @(negedge clk) hlda_on = 1'b1;
++    `WAIT_B(w20a, hlda, 100)
++    @(negedge clk) t = n16;
++    request(0, 1, 1'b0);
++    wait_idle;
++    @(negedge clk) hlda_on = 1'b0;
++    `WAIT_B(w20b, !hlda, 100)
++    run_ch(1, 0, 1'b0);
++    if (ntr - ntr0 == 1 && samp0 > t) begin
++        if (hrq_up - samp0 != 4) begin
++            $sformat(dmsg, "HRQ %0d after the DRQ sample, expected 4", hrq_up - samp0); ck(1'b0, dmsg);
++        end
++        if (s1_of[ntr0] - samp0 != 18) begin
++            $sformat(dmsg, "AEN (S1) %0d after the DRQ sample, expected 18 (SI, S0, S1)", s1_of[ntr0] - samp0);
++            ck(1'b0, dmsg);
++        end
++    end else ck(1'b0, "no DRQ0 sample or no transfer");
++
+     if (errors == 0) $display("PASS: vt57f (%0d transfers)", ntr);
+     $finish;
+ end

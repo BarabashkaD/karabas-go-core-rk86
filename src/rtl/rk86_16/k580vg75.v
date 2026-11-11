@@ -88,7 +88,7 @@ assign irq = ir;
 reg [7:0] ch = 8'd0;           // character counter: 0..H display, H+1..H+2(Z+1) retrace
 reg [3:0] ln = 4'd0;           // line counter (line number)
 reg [6:0] rw = 7'd0;           // row counter: 0..R display, R+1..R+VV+1 retrace
-reg [5:0] frame = 6'd0;        // VRTC count, for blinking
+reg [4:0] frame = 5'd0;        // VRTC count, for blinking (bits 4 and 3)
 reg       preset = 1'b0, hold = 1'b0, rel = 1'b0;
 wire [7:0] h_last = {1'b0, p_h};
 wire [7:0] line_last = h_last + {3'b000, p_z, 1'b0} + 8'd2;
@@ -132,8 +132,9 @@ initial begin
     for (k = 0; k < 32; k = k + 1) fifo[k] = 7'h00;
 end
 
-function text_row(input [6:0] r);                // a display row that is not blanked by spaced rows
-    text_row = r <= r_last && !(p_s && r[0]);     // SILENT S8
+// a display row that is not blanked by spaced rows; S and the last row as arguments (not read from the module scope)
+function text_row(input [6:0] r, input s, input [6:0] last);
+    text_row = r <= last && !(s && r[0]);         // SILENT S8
 endfunction
 
 function [3:0] ca_table(input [3:0] c, input [1:0] where);   // {LA1, LA0, VSP, LTEN} ([D79] 1-174)
@@ -159,14 +160,14 @@ task row_start(input [6:0] rn);
     begin
         vrtc <= rn > r_last;
         if (rn == r_last + 7'd1) begin                 // VRTC rises: field attributes and End of Screen reset
-            frame <= frame + 6'd1; eos <= 1'b0; fa <= 6'd0; fa_row <= 6'd0;
+            frame <= frame + 5'd1; eos <= 1'b0; fa <= 6'd0; fa_row <= 6'd0;
         end else fa_row <= fa;
         if (rn == row_last) ustop <= 1'b0;             // S11 (decided 2026-11-11, D11): the row 0 fill runs
         if (rn == 7'd0) ublank <= 1'b0;                // the display of the new frame
-        t_ur = text_row(rn) && fill && !filled;        // SILENT S11: the moment of the underrun check
+        t_ur = text_row(rn, p_s, r_last) && fill && !filled;        // SILENT S11: the moment of the underrun check
         if (t_ur) begin du <= 1'b1; ustop <= 1'b1; ublank <= 1'b1; end
-        if (text_row(rn)) dsel <= !dsel;
-        if ((rn == row_last || text_row(rn + 7'd1)) && dmae && !t_ur && (!ustop || rn == row_last)
+        if (text_row(rn, p_s, r_last)) dsel <= !dsel;
+        if ((rn == row_last || text_row(rn + 7'd1, p_s, r_last)) && dmae && !t_ur && (!ustop || rn == row_last)
             && (rn == row_last || !fstop)) begin
             fill <= 1'b1; filled <= 1'b0; ipos <= 7'd0; iw <= 4'd0; icount <= 5'd0; to_fifo <= 1'b0;
             stop_next <= 1'b0; stop_frame <= 1'b0; bleft <= bcn; space <= 6'd0; drq <= 1'b1;
@@ -199,10 +200,16 @@ always @(posedge clk) begin
             // S12 / S11 (decided): an underrun's DMA stop ends at the resume (row_start of the last retrace row),
             // its first DMA is the row 0 fill; ublank stays until the row 0 start
         end else if (!hold) begin
+            // the burst space before the row starts below, so that a row start in the same CCLK decides DRQ: after
+            // an underrun no DMA request ([D79] 1-180 "the DMA operation is stopped"; final review 2026-11-11, I1)
+            if (space != 6'd0) begin                                                 // the burst space
+                space <= space - 6'd1;
+                if (space == 6'd1 && fill && !filled && dmae) begin bleft <= bcn; drq <= 1'b1; end
+            end
             if (rel) begin                      // the resume: the row start of the last retrace row (VRTC↑,
                 rel <= 1'b0;                    // the row 0 fill) with the actions of a VRTC rise
                 row_start(row_last);
-                frame <= frame + 6'd1; eos <= 1'b0; fa <= 6'd0; fa_row <= 6'd0;
+                frame <= frame + 5'd1; eos <= 1'b0; fa <= 6'd0; fa_row <= 6'd0;
             end
             ch <= chn;
             t_ln = ln;
@@ -222,10 +229,6 @@ always @(posedge clk) begin
             if (chn == 8'd0) hrtc <= 1'b0;                                           // HRTC falls: a line begins
             if (ir_set) ir <= 1'b1;                                                  // the last display row
             lc <= p_m ? (t_ln == 4'd0 ? p_l : t_ln - 4'd1) : t_ln;
-            if (space != 6'd0) begin                                                 // the burst space
-                space <= space - 6'd1;
-                if (space == 6'd1 && fill && !filled && dmae) begin bleft <= bcn; drq <= 1'b1; end
-            end
             if (chn > h_last || rw > r_last) begin                                   // HRTC or VRTC
                 vsp <= 1'b1; lten <= 1'b0; rvv <= 1'b0; hglt <= 1'b0; la <= 2'b00; gpa <= 2'b00;  // SILENT S5
             end else begin
@@ -256,7 +259,7 @@ always @(posedge clk) begin
                 end
                 if (t_cur && !p_c[0]) t_r = !t_r;                     // reverse video block (SILENT S4)
                 if (t_cur && p_c[0] && t_reg == 2'd1) t_l = 1'b1;     // underline
-                if (!ve || ublank || !text_row(rw) || (p_u[3] && (ln == 4'd0 || ln == p_l))) t_v = 1'b1;
+                if (!ve || ublank || !text_row(rw, p_s, r_last) || (p_u[3] && (ln == 4'd0 || ln == p_l))) t_v = 1'b1;
                 if (!ve || ublank) t_l = 1'b0;                        // SILENT S6
                 cc <= t_cc; la <= t_la; vsp <= t_v; lten <= t_l; rvv <= t_r; hglt <= t_h; gpa <= t_g;
             end

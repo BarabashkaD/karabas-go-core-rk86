@@ -1,0 +1,22 @@
+diff --git a/src/rtl/rk86_16/rk86_machine16.v b/src/rtl/rk86_16/rk86_machine16.v
+index 8e0a131..688e819 100644
+--- a/src/rtl/rk86_16/rk86_machine16.v
++++ b/src/rtl/rk86_16/rk86_machine16.v
+@@ -77,7 +77,7 @@ wire [3:0] lc;
+ wire vsp, lten, rvv;
+ wire [7:0] dma_di;
+ k580vg75 crt(.clk(clk), .cclk(cclk_fall), .cs_n(~sel_crt), .rd_n(rd_line_n), .wr_n(cpu_wr_n & ior_n), .a0(bus_a[0]),
+-    .d_i(aen ? dma_di : cpu_do), .d_o(crt_o), .drq(crt_drq), .dack_n(dack_n[2]), .irq(), .lpen(1'b0),
++    .d_i(aen ? mem_di : cpu_do), .d_o(crt_o), .drq(crt_drq), .dack_n(dack_n[2]), .irq(), .lpen(1'b0),
+     .hrtc(hrtc), .vrtc(vrtc), .cc(cc), .lc(lc), .la(), .vsp(vsp), .lten(lten), .rvv(rvv), .hglt(), .gpa());
+ //---------------- the keyboard 8255 (8000-9FFF): PA rows out, PB columns in, PC7-PC5 shift keys, PC4 tape in
+ wire [7:0] pa_o, pb_o, pc_o, pc_oe;
+@@ -108,7 +108,7 @@ always @(*) cpu_i = rd_mux(cpu_a, startup, mem_di, ppa_o, ext_di, crt_o);
+ assign dma_di = rd_mux(bus_a, startup, mem_di, ppa_o, ext_di, crt_o);
+ // the monitor: bus_a E000-FFFF (the CPU's or the 8257's address), every address during start-up (the 8257 makes no
+ // transfer then: RESET resets it, and start-up ends at the monitor's first read with A15 = 1, before it programs it)
+-always @(*) rom = startup || bus_a[15:13] == 3'b111;
++always @(*) rom = !aen && (startup || cpu_a[15:13] == 3'b111);
+ // GLUE-12: set by RESET, ended by the first read with A15 = 1 (DBIN AND A15, Kiselev 1.4 U17B / U20A)
+ always @(posedge clk) startup <= sys_reset | (startup & ~(cpu_dbin & cpu_a[15]));
+ //---------------- the video path

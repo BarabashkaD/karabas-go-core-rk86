@@ -7,15 +7,40 @@ to its own data sheet (Intel 8224, 8255A, 8257, 8275; К155ИЕ4, К155ИР13, �
 | File | Source | Licence | Changes |
 |---|---|---|---|
 | `k580vm80a.v` | MiSTer-devel/Apogee_MiSTer `rtl/k580vm80a.v` at 4b37da2; author Vslav (1801BM1), as in the file header | CC-BY 3.0 | line endings (CR LF to LF) only |
-| `k580vt57.v` | rewritten to the 8257 data sheet; base: Apogee_MiSTer `rtl/k580vt57.v` at 4b37da2 (Dmitry Tselikov, Sorgelig) | modified BSD (`../../LICENSE.TXT`) | listed in the file header |
+| `k580vt57.v` | rewritten to the 8257 data sheet; base: Apogee_MiSTer `rtl/k580vt57.v` at 4b37da2 (Dmitry Tselikov) | modified BSD (`../../LICENSE.TXT`) | listed in the file header |
 | `k580vg75.v` | rewritten to the 8275 data sheet; base: Apogee_MiSTer `rtl/k580vg75.sv` at 4b37da2 (Dmitry Tselikov, Sorgelig) | modified BSD | listed in the file header |
 | `k580vv55.v`, `rk86_clocks16.v`, `rk86_video16.v`, `rk86_machine16.v` | this project | modified BSD | |
+
+## The board glue (`rk86_machine16.v`)
+
+The address decoder (D11 on A13-A15) works on the system address, which is the 8257's while its AEN is
+high, and ЧТЕНИЕ (DBIN XOR the 8257 MEMW) enables whatever it selects. So a read, by the CPU or by the DMA,
+gets the device at the system address: the RAM at 0000-7FFF, the keyboard 8255 at 8000-9FFF, the window
+(`ext_di`) at A000-BFFF, the 8275's own read data at C000-DFFF, the monitor ROM (`rom` high) at E000-FFFF;
+during start-up the monitor at every address (the 8257 is reset then). The 8275 takes the DMA byte from that
+same read path (GLUE-1, GLUE-2, GLUE-3, GLUE-10; final review 2026-11-11, I2). The RK86 monitor points the
+8257 only at the RAM; a program that puts the screen elsewhere sees what the boards show. The 8275 WR is the
+CPU WR AND the 8257 IOR; the memory write strobe is the CPU WR. Machine TB: the glue checks at every clk,
+and a forced DMA read pass over 0000-FFFF after the frames (fault `dma_rom_from_ram`).
 
 ## Decisions where the data sheets are silent
 
 Where a data sheet does not decide a behaviour, the board decides (the picture and timing of the Радио 1986
-and Kiselev 1.4 boards); the decision is marked `SILENT` in the file header. The one below is approved for
-now and waits for a check on a real chip (next section).
+and Kiselev 1.4 boards); the decision is marked `// SILENT` (with its record ID where it has one) at the
+code line that decides it. These recorded decisions are in the code without an inline marker:
+
+- `k580vv55.v`: PC3 takes its direction from control bit 0 and a port C byte write changes the free upper
+  bits (PPI-24, PPI-29); RD and WR act only with CS low and the port's A1 A0 (PPI-31); the input latch
+  follows the port while STB is low (PPI-32).
+- `k580vt57.v`: a mode write resets the rotating priority (DMA-2); a status read clears the TC bits at IOR↑
+  (DMA-8); CS is ignored only in S1-S4 (DMA-14); RESET keeps the address and count registers (DMA-13);
+  the back-to-back channel is chosen at the θ↓ that starts S4, after any wait states (DMA-1, DMA-7, DMA-29);
+  the update flag clears at the θ↑ after the reload cycle's S4 (DMA-24).
+- `k580vg75.v`: field attributes reset at the VRTC rise (CRT-31); the first DRQ of a row fill is not
+  delayed by the burst space (CRT-20); commands are decoded by bits 7-5 (CRT-42); Disable Interrupt leaves
+  IR set (CRT-8).
+
+The one below is approved for now and waits for a check on a real chip (next section).
 
 ### 8275: the DMA restart after an underrun (`k580vg75.v`, S11; decided 2026-11-11)
 
@@ -35,7 +60,8 @@ now and waits for a check on a real chip (next section).
   the phase of the boot against the raster) and after every tape operation. The boards show an aligned
   picture.
 - Tests: `tb_vg75_dma.v` check 6 (no DRQ and VSP high from the underrun row to the last retrace row; the
-  row-0 fill there within 0..84 ce16, 78 transfers; blanking until VRTC falls); the fault
+  row-0 fill there within 0..84 ce16, 78 transfers; blanking until VRTC falls) and check 6b (the same when a
+  burst space ends at the CCLK that finds the underrun; fault `vg75_underrun_space_redrq`); the fault
   `vg75_underrun_restart_late` (the strict reading) fails in `vg75`, `vg75_dma`, `vg75_attr` and `machine16`
   (the 8257 out of step with the frame).
 - To return to the strict reading: revert the commit "vg75 underrun: the DMA restarts with the row-0 fill"
@@ -49,9 +75,12 @@ now and waits for a check on a real chip (next section).
 - Model on the main line: S0 at the θ↓ that samples DRQ. The pins are the same unless HLDA is already
   high 9 ce16 after the sample; an 8080 raises HLDA later than that, so the Radio-86RK cannot show the
   difference.
-- The data sheet version is ready on the branch `rk86-16mhz-m9` (the RTL change, a check with HLDA held
-  high, a fault; the 8257 TBs and machine16 pass). Not merged for now (the maintainer, 2026-11-11): kept
-  for the real-hardware check below; a machine whose bus master raises HLDA early would need it.
+- The data sheet version is kept as one patch, `alt/vt57_si_state.patch` (`git format-patch` of the
+  commit, on base 7804b12: the RTL change, a check with HLDA held high, a fault; the 8257 TBs and
+  machine16 passed on that base). It does not apply to the current head as it is (the runner's fault list
+  and the regenerated faults have moved since): apply it on 7804b12 (`git am`) and rebase, or apply with
+  `git am -3` and resolve. Not merged for now (the maintainer, 2026-11-11): kept for the real-hardware
+  check below; a machine whose bus master raises HLDA early would need it.
 
 ## Follow-up: checks on real hardware
 
@@ -73,11 +102,11 @@ analyser. Not on the FPGA: an FPGA runs this model, so it cannot tell how the ch
 3. 8275 Reset command during a row fill: whether the fill in progress stops at once (the model: DMA and the
    fill stop; the partly filled row is shown as it is) and when DMA resumes after Start Display (S9: the
    model starts at the next row start with a fill due). Analyser: DRQ, DACK, WR, CS, A0.
-4. 8257 SI -> S0 after the DRQ sample (the decision above, branch `rk86-16mhz-m9`): not visible with an
+4. 8257 SI -> S0 after the DRQ sample (the decision above, `alt/vt57_si_state.patch`): not visible with an
    8080 (HLDA comes later than the difference). On the bench: hold the 8257's HLDA input high from a
    test fixture (not from the CPU) before DRQ rises, and capture CLK, DRQ, HRQ, AEN with the analyser:
    AEN (S1) 9 ce16 after the DRQ sample = the main line; one clock period later = the data sheet reading
-   on the branch.
+   of the patch.
 
 Record each result with the board, the chip markings and the analyser capture; a result that differs from
 the model changes the model and its tests, and this section.

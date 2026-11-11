@@ -1,0 +1,28 @@
+diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
+index e83600e..b95ce2d 100644
+--- a/src/rtl/rk86_16/k580vg75.v
++++ b/src/rtl/rk86_16/k580vg75.v
+@@ -199,12 +199,6 @@ always @(posedge clk) begin
+             // S12 / S11 (decided): an underrun's DMA stop ends at the resume (row_start of the last retrace row),
+             // its first DMA is the row 0 fill; ublank stays until the row 0 start
+         end else if (!hold) begin
+-            // the burst space before the row starts below, so that a row start in the same CCLK decides DRQ: after
+-            // an underrun no DMA request ([D79] 1-180 "the DMA operation is stopped"; final review 2026-11-11, I1)
+-            if (space != 6'd0) begin                                                 // the burst space
+-                space <= space - 6'd1;
+-                if (space == 6'd1 && fill && !filled && dmae) begin bleft <= bcn; drq <= 1'b1; end
+-            end
+             if (rel) begin                      // the resume: the row start of the last retrace row (VRTC↑,
+                 rel <= 1'b0;                    // the row 0 fill) with the actions of a VRTC rise
+                 row_start(row_last);
+@@ -228,6 +222,10 @@ always @(posedge clk) begin
+             if (chn == 8'd0) hrtc <= 1'b0;                                           // HRTC falls: a line begins
+             if (ir_set) ir <= 1'b1;                                                  // the last display row
+             lc <= p_m ? (t_ln == 4'd0 ? p_l : t_ln - 4'd1) : t_ln;
++            if (space != 6'd0) begin                                                 // the burst space
++                space <= space - 6'd1;
++                if (space == 6'd1 && fill && !filled && dmae) begin bleft <= bcn; drq <= 1'b1; end
++            end
+             if (chn > h_last || rw > r_last) begin                                   // HRTC or VRTC
+                 vsp <= 1'b1; lten <= 1'b0; rvv <= 1'b0; hglt <= 1'b0; la <= 2'b00; gpa <= 2'b00;  // SILENT S5
+             end else begin

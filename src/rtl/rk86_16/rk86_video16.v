@@ -4,6 +4,7 @@
 // the QA↑ with ИЕ4 count LOAD_STATE and shifting Q5 first; the К155ТМ2 D13.1 / U17A re-timing LTEN with
 // the load strobe and clearing the shift register (the whole character line lit); RVV XORed at the
 // output (U16D, Kiselev 1.4 only, D10). pix = 1 is a lit dot. HRTC and VRTC do not pass here.
+// New for the 16 MHz machine (karabas-go-core-rk86, rk86_16/); modified BSD license, see ../../LICENSE.TXT.
 `default_nettype none
 module rk86_video16 #(parameter [3:0] LOAD_STATE = 4'd10) (
     input  wire       clk,

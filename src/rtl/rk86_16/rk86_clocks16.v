@@ -13,6 +13,7 @@
 //   dot_ce   QA rises: every 2 periods, the 8 MHz dot clock of the ИР13
 //   cclk_fall, cclk_rise: QD (the 8275 CCLK, 1.333 MHz) falls / rises
 //   cnt12    the count 0..11 before this ce16; ie4 = QD QC QB QA of that count
+// New for the 16 MHz machine (karabas-go-core-rk86, rk86_16/); modified BSD license, see ../../LICENSE.TXT.
 `default_nettype none
 module rk86_clocks16 #(parameter F2_STEP = 2, parameter F2_FALL_STEP = 7) (
     input  wire       clk,

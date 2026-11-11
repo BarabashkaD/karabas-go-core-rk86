@@ -12,9 +12,10 @@
 // rise more than 2 clk after the last WR rise starts a new burst) and the burst spaces (ce16 from the last WR rise of
 // a burst to the next DRQ rise). Expected values come from the parameters the TB wrote, the image it serves and the
 // pin timing; flags from status reads (CS, A0, RD pulses).
-// The checks run in the order 1, 4, 3, 2, 6, 7, 8, 9, 5: a byte taken at WR fall also keeps DRQ high through the
+// The checks run in the order 1, 4, 3, 2, 6, 6b, 7, 8, 9, 5: a byte taken at WR fall also keeps DRQ high through the
 // burst and counts the burst space from WR fall, so the byte check comes before the DRQ and burst checks; check 5
-// changes the line length (a raster resync), so it comes last.
+// changes the line length (a raster resync), so it comes last. Check 6b holds the stand-in's WR of the last transfer
+// of a burst low until the CCLK fall that makes the burst space end exactly at the next row start.
 `default_nettype none
 `timescale 1ns/1ns
 `define WAIT_UNTIL(COND, LIM, WHAT) begin tw0 = n16; while (!(COND)) begin @(negedge clk); if (n16 > tw0 + (LIM)) begin $display("FATAL: vg75_dma: %0s timed out", WHAT); $finish; end end end
@@ -172,6 +173,10 @@ reg [8*24-1:0] t_cnt = "frame dma", t_disp = "frame dma";
 // fill) to the VRTC fall; u_nb, u_be: the CCLK falls of phase 2 and its ublank errors
 reg u_arm = 1'b0, u_stop = 1'b0;
 integer u_phase = 0, u_drq = 0, u_nv = 0, u_ve = 0, u_nb = 0, u_be = 0;
+// check 6b: uh_arm arms the hold of the last WR of burst 0 of the row 6 fill, uh_on while it is held, u_held from its
+// release to the row 6 start; u_topic names the underrun case in the messages of both phases
+reg uh_arm = 1'b0, uh_on = 1'b0, u_held = 1'b0;
+reg [8*40-1:0] u_topic = "underrun";
 integer t_ref, row, line;
 reg [13:0] ex;
 task open_window(input integer r); begin
@@ -258,14 +263,14 @@ task close_window; begin
     // after boot, so the fill runs as in every frame
     if (u_phase == 2 && w_row == m_nr + m_nv - 1) begin
         if (w_drq1 < 0 || w_drq1 - w_t0 > cur_s * 12) begin
-            $sformat(msg, "underrun: the first DRQ %0d ce16 after the row %0d start (the last retrace row), expected 0..%0d (the row 0 fill)",
-                w_drq1 < 0 ? -1 : w_drq1 - w_t0, w_row, cur_s * 12);
+            $sformat(msg, "%0s: the first DRQ %0d ce16 after the row %0d start (the last retrace row), expected 0..%0d (the row 0 fill)",
+                u_topic, w_drq1 < 0 ? -1 : w_drq1 - w_t0, w_row, cur_s * 12);
             err(msg);
         end else if (w_tr != w_e) begin
-            $sformat(msg, "underrun: the row 0 fill during row %0d: %0d transfers, expected %0d", w_row, w_tr, w_e); err(msg);
+            $sformat(msg, "%0s: the row 0 fill during row %0d: %0d transfers, expected %0d", u_topic, w_row, w_tr, w_e); err(msg);
         end
         if (u_nb != m_nv * m_nl * (m_nh + 2 * (m_z + 1))) begin
-            $sformat(msg, "underrun: %0d CCLK falls checked from the row %0d start to the VRTC fall, expected %0d", u_nb, w_row,
+            $sformat(msg, "%0s: %0d CCLK falls checked from the row %0d start to the VRTC fall, expected %0d", u_topic, u_nb, w_row,
                 m_nv * m_nl * (m_nh + 2 * (m_z + 1)));
             err(msg);
         end
@@ -349,15 +354,17 @@ always @(posedge clk) begin
         if (vf_ev) frame_edge;
         if (ri == m_nr - 1) img_mode = img_next;
         open_window(ri);
-        if (ri == 6 && u_stop) begin u_stop = 1'b0; u_arm = 1'b0; u_phase = 1; u_drq = 0; u_nv = 0; u_ve = 0; end
+        if (ri == 6 && (u_stop || u_held)) begin
+            u_stop = 1'b0; u_held = 1'b0; u_arm = 1'b0; u_phase = 1; u_drq = 0; u_nv = 0; u_ve = 0;
+        end
         if (u_phase == 1 && ri == m_nr + m_nv - 1) begin     // the start of the last retrace row after the underrun
             if (u_drq != 0) begin
-                $sformat(msg, "underrun: %0d DRQ rises from the row 6 start to the row %0d start, expected 0 (DMA stopped until the last retrace row)",
-                    u_drq, ri);
+                $sformat(msg, "%0s: %0d DRQ rises from the row 6 start to the row %0d start, expected 0 (DMA stopped until the last retrace row)",
+                    u_topic, u_drq, ri);
                 err(msg);
             end
             if (u_nv != (m_nr - 6) * m_nl * (m_nh + 2 * (m_z + 1))) begin
-                $sformat(msg, "underrun: %0d CCLK falls checked from the row 6 start to the row %0d start, expected %0d", u_nv, ri,
+                $sformat(msg, "%0s: %0d CCLK falls checked from the row 6 start to the row %0d start, expected %0d", u_topic, u_nv, ri,
                     (m_nr - 6) * m_nl * (m_nh + 2 * (m_z + 1)));
                 err(msg);
             end
@@ -433,7 +440,7 @@ always @(posedge clk) begin
         u_nv = u_nv + 1;
         if (vsp !== 1'b1 && u_ve < 4) begin
             u_ve = u_ve + 1;
-            $sformat(msg, "underrun: VSP low at line %0d char %0d, expected high from the row 6 start to the row %0d start", tl, tc,
+            $sformat(msg, "%0s: VSP low at line %0d char %0d, expected high from the row 6 start to the row %0d start", u_topic, tl, tc,
                 m_nr + m_nv - 1);
             err(msg);
         end
@@ -442,8 +449,8 @@ always @(posedge clk) begin
         u_nb = u_nb + 1;
         if (dut.ublank !== 1'b1 && u_be < 4) begin
             u_be = u_be + 1;
-            $sformat(msg, "underrun: the underrun blank low at line %0d char %0d, expected high from the row %0d start to the VRTC fall",
-                tl, tc, m_nr + m_nv - 1);
+            $sformat(msg, "%0s: the underrun blank low at line %0d char %0d, expected high from the row %0d start to the VRTC fall",
+                u_topic, tl, tc, m_nr + m_nv - 1);
             err(msg);
         end
     end
@@ -477,7 +484,12 @@ always @(posedge clk) begin
             3: begin
                 dcnt = dcnt + 1;
                 if (dcnt == 22 && s_late) dma_d <= s_b;
-                if (dcnt == 23) begin dma_wr_n <= 1'b1; dack_n <= 1'b1; dcnt = 0; dst = s_stray ? 4 : 0; end
+                // check 6b: the last transfer of burst 0 of the row 6 fill keeps WR low until a ce16 (not the CCLK
+                // one) of character m_nh - cur_s on the last line of row 5: the 8275 takes the byte between that
+                // character's CCLK fall and the next, so the burst space (cur_s CCLK) ends at the row 6 start
+                if (dcnt == 23 && uh_arm && w_open && w_row == 5 && s_k == cur_bc - 1) begin uh_arm = 1'b0; uh_on = 1'b1; end
+                if (uh_on && tl == 6 * m_nl - 1 && tc == m_nh - cur_s && !cclk) begin uh_on = 1'b0; u_held = 1'b1; end
+                if (dcnt >= 23 && !uh_on) begin dma_wr_n <= 1'b1; dack_n <= 1'b1; dcnt = 0; dst = s_stray ? 4 : 0; end
             end
             default: begin
                 dcnt = dcnt + 1;
@@ -575,7 +587,7 @@ task frame_window; begin
     `WAIT_UNTIL(fw_done, (fw_nfr + 2) * FRAME, "frame window")
 end endtask
 initial begin
-    wait (n16 >= 9000000); $display("FATAL: vg75_dma: run timed out"); $finish;
+    wait (n16 >= 10000000); $display("FATAL: vg75_dma: run timed out"); $finish;
 end
 initial begin
     if ($test$plusargs("dmalog")) dlog = 1'b1;
@@ -629,6 +641,22 @@ initial begin
     `WAIT_UNTIL(fw_done, 4 * FRAME, "underrun: the two frames after the VRTC fall")
     if (u_phase != 0) err("underrun: the row 0 fill after the underrun not checked");
     fw_nfr = 1;
+    //---------------- 6b. CRT-25 underrun at the end of a burst space (final review 2026-11-11, I1): BB = 11, SSS = 001;
+    // the stand-in holds the WR of transfer 7 (the last of burst 0) of the row 6 fill low until character m_nh - cur_s
+    // of the last line of row 5, so the burst space ends at the CCLK fall that starts row 6 and finds the fill late (8
+    // of 78): DU, and no DRQ from that row start to the last retrace row ([D79] 1-180 "the DMA operation is stopped"),
+    // VSP high; then the row 0 fill in the last retrace row as after check 6. No status read while WR is held.
+    u_topic = "underrun at the end of a burst space";
+    `WAIT_UNTIL(w_open && w_row == 2, FRAME + ROW, "underrun at a space end: row 2")
+    uh_arm = 1'b1;
+    `WAIT_UNTIL(uh_on, 4 * ROW, "underrun at a space end: the held WR in the row 6 fill")
+    `WAIT_UNTIL(u_phase == 1, 2 * ROW, "underrun at a space end: the row 6 start")
+    `WAIT_UNTIL(w_open && w_row == 8, 3 * ROW, "underrun at a space end: row 8")
+    wait_n(LINE);
+    stat_chk(8'h02, 8'h02, "underrun at a space end", "after the row 8 start (the space ended at the row 6 start)");
+    stat_chk(8'h00, 8'h02, "underrun at a space end", "the status read after DU");
+    `WAIT_UNTIL(u_phase == 0, FRAME, "underrun at a space end: the row 0 fill")
+    u_topic = "underrun";
     //---------------- 7. CRT-26 special codes
     ids = "CRT-26, [D79] 1-175";
     use_image(IM_SPEC); img_next = IM_NORM;

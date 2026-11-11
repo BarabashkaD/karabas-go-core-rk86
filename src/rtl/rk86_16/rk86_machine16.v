@@ -4,6 +4,12 @@
 // the devices decode the system address (the DMA's while the 8257's AEN is high); ЧТЕНИЕ = DBIN XOR
 // MEMW; the 8275 WR = CPU WR AND the 8257 IOR; the memory write strobe is the CPU's WR; during start-up
 // (RESET to the first read with A15 = 1) the monitor answers every address, RAM and every device off.
+// A read gives the data of the device at the system address, for the CPU and for a DMA read alike (GLUE-1,
+// GLUE-2, GLUE-3, GLUE-10: the board decodes the system address, ЧТЕНИЕ enables what is selected): the RAM
+// at 0000-7FFF, the keyboard 8255 at 8000-9FFF, the window (ext_di) at A000-BFFF, the 8275's own read data
+// at C000-DFFF, the monitor ROM (rom high) at E000-FFFF; so a DMA block outside the RAM reaches the 8275 as
+// on the boards (final review 2026-11-11, I2).
+// New for the 16 MHz machine (karabas-go-core-rk86, rk86_16/); modified BSD license, see ../../LICENSE.TXT.
 `default_nettype none
 module rk86_machine16 #(parameter [3:0] LOAD_STATE = 4'd10) (
     input  wire        clk,
@@ -14,7 +20,7 @@ module rk86_machine16 #(parameter [3:0] LOAD_STATE = 4'd10) (
     output wire  [7:0] cpu_do,
     output wire        mem_rd,        // ЧТЕНИЕ, active high
     output wire        cpu_wr_n,
-    output reg         rom,           // the monitor selected: E000-FFFF, or every address while startup
+    output reg         rom,           // the monitor selected: bus_a E000-FFFF, or every address while startup
     output reg         startup = 1'b1,
     output wire        aen,
     input  wire  [7:0] mem_di,        // the memory at bus_a
@@ -70,8 +76,9 @@ assign bus_a = aen ? dma_a : cpu_a;
 wire [6:0] cc;
 wire [3:0] lc;
 wire vsp, lten, rvv;
+wire [7:0] dma_di;
 k580vg75 crt(.clk(clk), .cclk(cclk_fall), .cs_n(~sel_crt), .rd_n(rd_line_n), .wr_n(cpu_wr_n & ior_n), .a0(bus_a[0]),
-    .d_i(aen ? mem_di : cpu_do), .d_o(crt_o), .drq(crt_drq), .dack_n(dack_n[2]), .irq(), .lpen(1'b0),
+    .d_i(aen ? dma_di : cpu_do), .d_o(crt_o), .drq(crt_drq), .dack_n(dack_n[2]), .irq(), .lpen(1'b0),
     .hrtc(hrtc), .vrtc(vrtc), .cc(cc), .lc(lc), .la(), .vsp(vsp), .lten(lten), .rvv(rvv), .hglt(), .gpa());
 //---------------- the keyboard 8255 (8000-9FFF): PA rows out, PB columns in, PC7-PC5 shift keys, PC4 tape in
 wire [7:0] pa_o, pb_o, pc_o, pc_oe;
@@ -81,20 +88,28 @@ k580vv55 ppa(.clk(clk), .reset(sys_reset), .cs_n(~sel_ppa), .rd_n(rd_line_n), .w
     .pc_i({kbd_shift, tape_in, 4'hF}), .pc_o(pc_o), .pc_oe(pc_oe));
 assign ppa_pa = pa_oe ? pa_o : 8'hFF;
 assign pc0 = pc_oe[0] ? pc_o[0] : 1'b1;
-//---------------- the window and the CPU's data input
+//---------------- the window and the read data
 assign ext_we_n = ~sel_ext | cpu_wr_n;
 assign ext_rd_n = ~sel_ext | rd_line_n;
-always @(*)
-    if (startup) cpu_i = mem_di;                     // the monitor at every address (rom)
+// the data of a read at address a: the device the decoder selects there (GLUE-1, GLUE-2, GLUE-3, GLUE-10)
+function [7:0] rd_mux(input [15:0] a, input su, input [7:0] mem, input [7:0] ppa, input [7:0] ext, input [7:0] crt);
+    if (su) rd_mux = mem;                            // the monitor at every address (rom)
     else
-        casex (cpu_a[15:13])
-            3'b0xx:  cpu_i = mem_di;
-            3'b100:  cpu_i = ppa_o;
-            3'b101:  cpu_i = ext_di;
-            3'b110:  cpu_i = crt_o;
-            default: cpu_i = mem_di;
+        casex (a[15:13])
+            3'b0xx:  rd_mux = mem;
+            3'b100:  rd_mux = ppa;
+            3'b101:  rd_mux = ext;
+            3'b110:  rd_mux = crt;
+            default: rd_mux = mem;                   // the monitor (rom)
         endcase
-always @(*) rom = !aen && (startup || cpu_a[15:13] == 3'b111);
+endfunction
+// the CPU reads only while AEN is low, where bus_a is cpu_a; the 8275 takes a DMA byte while AEN is high: the
+// device at the 8257's address, as the board's ЧТЕНИЕ (the 8257 MEMW) enables it
+always @(*) cpu_i = rd_mux(cpu_a, startup, mem_di, ppa_o, ext_di, crt_o);
+assign dma_di = rd_mux(bus_a, startup, mem_di, ppa_o, ext_di, crt_o);
+// the monitor: bus_a E000-FFFF (the CPU's or the 8257's address), every address during start-up (the 8257 makes no
+// transfer then: RESET resets it, and start-up ends at the monitor's first read with A15 = 1, before it programs it)
+always @(*) rom = startup || bus_a[15:13] == 3'b111;
 // GLUE-12: set by RESET, ended by the first read with A15 = 1 (DBIN AND A15, Kiselev 1.4 U17B / U20A)
 always @(posedge clk) startup <= sys_reset | (startup & ~(cpu_dbin & cpu_a[15]));
 //---------------- the video path

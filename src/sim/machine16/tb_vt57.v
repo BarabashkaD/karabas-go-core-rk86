@@ -174,3 +174,4 @@ initial begin
     $finish;
 end
 endmodule
+`default_nettype wire

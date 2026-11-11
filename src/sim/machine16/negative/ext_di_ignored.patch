@@ -1,0 +1,13 @@
+diff --git a/src/rtl/rk86_16/rk86_machine16.v b/src/rtl/rk86_16/rk86_machine16.v
+index 8e0a131..9fb51d3 100644
+--- a/src/rtl/rk86_16/rk86_machine16.v
++++ b/src/rtl/rk86_16/rk86_machine16.v
+@@ -97,7 +97,7 @@ function [7:0] rd_mux(input [15:0] a, input su, input [7:0] mem, input [7:0] ppa
+         casex (a[15:13])
+             3'b0xx:  rd_mux = mem;
+             3'b100:  rd_mux = ppa;
+-            3'b101:  rd_mux = ext;
++            3'b101:  rd_mux = 8'hFF;
+             3'b110:  rd_mux = crt;
+             default: rd_mux = mem;                   // the monitor (rom)
+         endcase

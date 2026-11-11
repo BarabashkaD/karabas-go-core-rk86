@@ -9,14 +9,19 @@ TEST: names from TESTS (default: all). --list prints the names and exits.
             vvp is taken from its directory
 --negative  also run every fault of the test: src/sim/machine16/negative/<name>.patch (made with git
             diff against the repository root) applied with git apply to copies of the files under
-            build/sim/machine16/<test>/neg_<name>/; a fault passes when the run fails and its output
-            contains the expected text
---mem       replace src/sim/machine16/tb_rk86_mem16.v in the file list of a test by these files
---frames    sets the parameter FRAMES of the top
+            build/sim/machine16/<test>/neg_<name>/; a fault is caught when the run fails and its first
+            ERROR line (the first line that starts with ERROR or contains FATAL) contains the expected
+            text; '*' in the expected text stands for any characters (the frame and row numbers)
+--mem       replace src/sim/machine16/tb_rk86_mem16.v in the file list of a test by these files; with
+            --negative a fault that patches only that file is skipped (printed SKIPPED (--mem))
+--frames    sets the parameter FRAMES of the tests that have it (frames=True in TESTS: machine16)
 A test entry of TESTS: top, files (repository-relative paths, or a function that returns them),
-params (-P<top>.<name>=<value>), plusargs (+<name>=<value> on the vvp line), hexfiles
-{name: repository-relative binary} (written by write_hexfiles as <name>.hex, one byte per line, into
-the output folder, and passed as +<name>=<name>.hex), negatives [(name, expected text)].
+params (-P<top>.<name>=<value>), frames (True: the top has the parameter FRAMES), plusargs
+(+<name>=<value> on the vvp line), hexfiles {name: repository-relative binary} (written by
+write_hexfiles as <name>.hex, one byte per line, into the output folder, and passed as
++<name>=<name>.hex), negatives [(name, expected text)] or [(name, expected text, 'anywhere')]: with
+'anywhere' the expected text may be anywhere in the output, not only on the first ERROR line (only for a
+fault whose own check is knowingly not the first to fail; the entry says why).
 Pass rule: vvp exits 0, prints a line that starts with PASS and no line that starts with ERROR or
 contains FATAL. Outputs: build/sim/machine16/<test>/ (ignored by git).
 Exit code 0 when every run passes and every fault is caught, 1 otherwise, 2 when a tool is missing
@@ -24,6 +29,7 @@ or the test name is unknown.
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -51,16 +57,20 @@ TESTS = {
                                 ('cclk_misaligned', 'ERROR: clocks16: cclk_fall alignment'),
                                 ('ststb_reset_lag', 'ERROR: clocks16: ststb at period')]),
     'vv55': dict(top='tb_vv55', files=['src/sim/machine16/tb_vv55.v', 'src/rtl/rk86_16/k580vv55.v'],
-                 negatives=[('vv55_no_output_reset', 'ERROR: vv55: mode set'), ('vv55_bsr_bit', 'ERROR: vv55: bsr'),
-                            ('vv55_ibf_on_rd_fall', 'ERROR: vv55: mode 1 input'),
-                            ('vv55_obf_ack_ignored', 'ERROR: vv55: mode 1 output'),
-                            ('vv55_mode2_buffer', 'ERROR: vv55: mode 2'),
-                            ('vv55_pc_upper_mode0_only', 'ERROR: vv55: port C byte write'),
-                            ('vv55_intr_pulse', 'ERROR: vv55: intr pulse'),
-                            ('vv55_mode_set_keeps_status', 'ERROR: vv55: mode set: status'),
-                            ('vv55_wr_no_cs', 'ERROR: vv55: cs: wr'), ('vv55_rd_no_cs', 'ERROR: vv55: cs: rd'),
-                            ('vv55_byte_write_inte', 'ERROR: vv55: byte write inte'),
-                            ('vv55_pc3_mixed', 'ERROR: vv55: pc3 mixed')]),
+                 negatives=[('vv55_no_output_reset', 'ERROR: vv55: mode set: latches not cleared'),
+                            ('vv55_bsr_bit', 'ERROR: vv55: bsr set'),
+                            ('vv55_ibf_on_rd_fall', 'ERROR: vv55: mode 1 input: ibf / intr during rd'),
+                            ('vv55_obf_ack_ignored', 'ERROR: vv55: mode 1 output: obf after ack'),
+                            ('vv55_mode2_buffer', 'ERROR: vv55: mode 2: port A buffer enabled without ack'),
+                            ('vv55_pc_upper_mode0_only', 'ERROR: vv55: port C byte write at '),
+                            ('vv55_intr_pulse', 'ERROR: vv55: intr pulse after rd: mode 1 port A input'),
+                            ('vv55_mode_set_keeps_status', 'ERROR: vv55: mode set: status ibf not cleared'),
+                            ('vv55_wr_no_cs', 'ERROR: vv55: cs: wr without cs'),
+                            ('vv55_rd_no_cs', 'ERROR: vv55: cs: rd without cs'),
+                            ('vv55_byte_write_inte', 'ERROR: vv55: byte write inte: inte cleared by C7h'),
+                            ('vv55_pc3_mixed', 'ERROR: vv55: pc3 mixed: 8Eh pins'),
+                            # RESET leaves the mode (final review 2026-11-11 (B), I2: RESET from a non-reset state)
+                            ('vv55_reset_keeps_mode', 'ERROR: vv55: reset: ports not inputs after a RESET pulse')]),
     'vt57': dict(top='tb_vt57', files=['src/sim/machine16/tb_vt57.v', 'src/rtl/rk86_16/k580vt57.v'],
                  negatives=[('vt57_extra_state', 'ERROR: vt57: dack at 36'), ('vt57_s4_to_s1', 'ERROR: vt57: period 36'),
                             ('vt57_address_early', 'ERROR: vt57: address'), ('vt57_one_edge', 'ERROR: vt57: aen rise 0'),
@@ -77,26 +87,30 @@ TESTS = {
                             ('vt57_count_frozen', 'ERROR: vt57: count after 8 transfers'),
                             ('vt57_upd_kept', 'ERROR: vt57: update flag after the reload')]),
     'vt57_func': dict(top='tb_vt57_func', files=['src/sim/machine16/tb_vt57_func.v', 'src/rtl/rk86_16/k580vt57.v'],
-                      negatives=[('vt57f_priority_fixed', 'ERROR: vt57f: rotating'),
-                                 ('vt57f_read_strobes', 'ERROR: vt57f: read cycle'),
-                                 ('vt57f_ready_ignored', 'ERROR: vt57f: ready'),
-                                 ('vt57f_tc_stop_ignored', 'ERROR: vt57f: tc stop'),
-                                 ('vt57f_autoload_early', 'ERROR: vt57f: autoload'),
-                                 ('vt57f_mark_tc_only', 'ERROR: vt57f: mark'),
-                                 ('vt57f_ff_not_reset', 'ERROR: vt57f: first/last'),
-                                 ('vt57f_hlda_lost_s0', 'ERROR: vt57f: hlda lost'),
-                                 ('vt57f_cont_no_hlda', 'ERROR: vt57f: hlda lost'),
-                                 ('vt57f_verify_wait', 'ERROR: vt57f: verify'),
-                                 ('vt57f_b2b_no_reload', 'ERROR: vt57f: autoload'),
+                      negatives=[('vt57f_priority_fixed', 'ERROR: vt57f: rotating: order: transfer 1 channel 0, expected 1'),
+                                 ('vt57f_read_strobes', 'ERROR: vt57f: read cycle: memr at 13 (transfer 0)'),
+                                 ('vt57f_ready_ignored', 'ERROR: vt57f: ready: memw at 31 (transfer 0)'),
+                                 ('vt57f_tc_stop_ignored', 'ERROR: vt57f: tc stop: 6 transfers, expected 4'),
+                                 # the reload at TC moves the channel 2 address within the TC cycle of check 8
+                                 ('vt57f_autoload_early', 'ERROR: vt57f: tc output: address at 22 (transfer 2)'),
+                                 ('vt57f_mark_tc_only', 'ERROR: vt57f: mark: mark at 22 (transfer 127)'),
+                                 ('vt57f_ff_not_reset',
+                                  'ERROR: vt57f: first/last: read after a mode write 12, expected the low byte AA'),
+                                 ('vt57f_hlda_lost_s0', 'ERROR: vt57f: hlda lost: hrq at 40 (transfer 1)'),
+                                 ('vt57f_cont_no_hlda', 'ERROR: vt57f: hlda lost: S1 while HLDA is low'),
+                                 ('vt57f_verify_wait', 'ERROR: vt57f: verify: the transfers do not end'),
+                                 ('vt57f_b2b_no_reload', 'ERROR: vt57f: autoload: address at 4 (transfer 2)'),
                                  ('vt57f_address_switch', 'ERROR: vt57f: priority: address at 36'),
-                                 ('vt57f_s0_no_return', 'ERROR: vt57f: s0 return'),
-                                 ('vt57f_mode_any_a', 'ERROR: vt57f: addressing'),
-                                 ('vt57f_status_a_only', 'ERROR: vt57f: addressing'),
-                                 ('vt57f_illegal_strobes', 'ERROR: vt57f: illegal cycle'),
-                                 ('vt57f_rotate_b2b_only', 'ERROR: vt57f: rotating'),
-                                 ('vt57f_tcstop_all', 'ERROR: vt57f: tc stop'),
-                                 ('vt57f_reset_keeps_up', 'ERROR: vt57f: reset'),
-                                 ('vt57f_reload_any_channel', 'ERROR: vt57f: autoload'),
+                                 ('vt57f_s0_no_return', 'ERROR: vt57f: s0 return: hrq 1 at HRQ rise + 27'),
+                                 ('vt57f_mode_any_a', 'ERROR: vt57f: addressing: address after writes to A = 9-15:'
+                                  ' register 0 reads 1218, expected 1234'),
+                                 ('vt57f_status_a_only', 'ERROR: vt57f: addressing: read at A = 11: ff, expected the status 01'),
+                                 ('vt57f_illegal_strobes', 'ERROR: vt57f: illegal cycle: ior at 13 (transfer 0)'),
+                                 ('vt57f_rotate_b2b_only', 'ERROR: vt57f: rotating: order: transfer 0 channel 0, expected 1'),
+                                 ('vt57f_tcstop_all', 'ERROR: vt57f: tc stop: 0 transfers, expected 1'),
+                                 ('vt57f_reset_keeps_up', 'ERROR: vt57f: reset: UP and TC1 after RESET: status 10, expected 00'),
+                                 ('vt57f_reload_any_channel',
+                                  'ERROR: vt57f: autoload: after a channel 0 cycle between: status 00, expected 10'),
                                  # the 8257 data sheet review of 2026-11-11 (merged.md A3, A13)
                                  ('vt57f_enable_ignored', 'ERROR: vt57f: enables: DACK of a disabled channel'),
                                  ('vt57f_cs_in_master', 'ERROR: vt57f: cs: no DACK0 after a mode write in S2')]),
@@ -141,6 +155,11 @@ TESTS = {
                                 ('vg75_underrun_restart_late',
                                  'ERROR: vg75: underrun: the first DRQ -1 ce16 after the row 30 start (the last retrace row),'
                                  ' expected 0..84 (the row 0 fill) (CRT-25, [D79] 1-172, 1-180, S11)'),
+                                # the burst space block after the row start in the clocked block (final review
+                                # 2026-11-11, I1): DRQ again at the CCLK fall that finds the underrun
+                                ('vg75_underrun_space_redrq',
+                                 'ERROR: vg75: underrun at the end of a burst space: 1 DRQ rises from the row 6 start to'
+                                 ' the row 30 start, expected 0 (DMA stopped until the last retrace row)'),
                                 ('vg75_fifo_off',
                                  'ERROR: vg75: fifo: during row 1 (the row 2 fill): 78 transfers, expected 79'
                                  ' (CRT-27, [D79] 1-165, 1-176)'),
@@ -177,30 +196,50 @@ TESTS = {
                                   'ERROR: vg75: cc: an underrun in the row 2 fill: row 0 line 0 char 0 (code 63): CC 29,'
                                   ' expected 63')]),
     'video16': dict(top='tb_video16', files=['src/sim/machine16/tb_video16.v', 'src/rtl/rk86_16/rk86_video16.v'],
-                    negatives=[('video_load_at_0', 'ERROR: video16: dot'), ('video_shift_order', 'ERROR: video16: dot'),
-                               ('video_lten_unlatched', 'ERROR: video16: lten'), ('video_vsp_ignored', 'ERROR: video16: vsp')]),
-    'machine16': dict(top='tb_rk86_machine16',
+                    negatives=[('video_load_at_0', 'ERROR: video16: dot 1 of character 1'),
+                               ('video_shift_order', 'ERROR: video16: dot 0 of character 2'),
+                               ('video_lten_unlatched', 'ERROR: video16: lten at dot 0 of character 15'),
+                               ('video_vsp_ignored', 'ERROR: video16: vsp at dot 0 of character 7')]),
+    'machine16': dict(top='tb_rk86_machine16', frames=True,
                       files=lambda: ['src/sim/machine16/cpu_power_up.vh', 'src/sim/machine16/tb_rk86_machine16.v',
                                      'src/sim/machine16/tb_m16_dma_checks.v', MEM]
                       + prj_files('src/rk86_machine16.prj'),
                       hexfiles=dict(bios='src/roms/BIOS.BIN', font='src/roms/FONT.BIN'),
-                      negatives=[('crt_wr_without_ior', 'ERROR: glue: 8275 WR'),
+                      negatives=[('crt_wr_without_ior', 'ERROR: glue: 8275 WR: not CPU WR AND 8257 IOR'),
                                  # the 8257 on the character clock: the glue check of its CLK pin is the first
                                  # ERROR (from the first clk); the bus timing checks alone give 'aen per transfer'
                                  ('dma_on_char_clock', 'ERROR: glue: 8257 CLK: not 8224 F2'),
-                                 ('vg75_drq_held', 'ERROR: hold periods'),
-                                 ('vg75_burst_count_ignored', 'ERROR: burst length'),
-                                 ('vg75_burst_space_ignored', 'ERROR: burst space'),
-                                 ('vg75_hrtc_7', 'ERROR: hrtc'),
-                                 ('bus_on_hlda', 'ERROR: glue: bus_a'),
+                                 ('vg75_drq_held', 'ERROR: hold periods: HRQ high after theta-up of S4'),
+                                 ('vg75_burst_count_ignored',
+                                  'ERROR: burst length: frame * fill: DRQ again after transfer 8 of burst 0, expected a burst of 8'),
+                                 ('vg75_burst_space_ignored',
+                                  'ERROR: burst space: frame * fill: DRQ back * ce16 after the WR rise of transfer 8 of burst 0'),
+                                 ('vg75_hrtc_7', 'ERROR: hrtc: HRTC high 84 ce16, expected 96'),
+                                 # the glue address checks fire within a few clk of the first HLDA (a write comes
+                                 # before it, so no CPU sample first); the sample check alone catches it too
+                                 ('bus_on_hlda', 'ERROR: glue: bus_a: not the 8257 address while AEN, else the CPU address'),
                                  # an extra state per transfer: Task 13's HOLD period check is the first ERROR (HRQ
                                  # high after θ↑ of S4); Task 14's DMA cost check caught it alone before the rebase
                                  # (Task 14 report)
-                                 ('vt57_extra_state', 'ERROR: hold periods'),
-                                 ('vt57_s4_to_s1', 'ERROR: hold periods'), ('mem16_dropped_after_rd', 'ERROR: dma byte'),
+                                 ('vt57_extra_state', 'ERROR: hold periods: HRQ high after theta-up of S4'),
+                                 ('vt57_s4_to_s1', 'ERROR: hold periods: HRQ high after theta-up of S4'),
+                                 # the memory drives only while ЧТЕНИЕ: the first ERROR is 'sample', from the opcode load
+                                 # during reset (DBIN low; the reset term of smp_op, tb_m16_dma_checks.v), not this
+                                 # fault's own check; the DMA byte check prints its own mismatches later (every DMA
+                                 # byte, handover 2026-11-10 3.3), so the text may come on any line
+                                 ('mem16_dropped_after_rd', 'ERROR: dma byte: the 8275 holds ff at the IOR rise', 'anywhere'),
                                  # the boot underrun with the DMA stopped through the whole vertical retrace: no row 0
                                  # fill, the 8257 block one row out of step with the frame (review finding 2026-11-11)
-                                 ('vg75_underrun_restart_late', 'ERROR: dma byte: frame ')]),
+                                 ('vg75_underrun_restart_late',
+                                  'ERROR: dma byte: frame *: its first DMA byte (the row 0 fill) is transfer'),
+                                 # a DMA read outside the RAM as the old model had it (rom low while AEN, the 8275
+                                 # fed the memory): the forced DMA read pass (phase 8) at FFFF (final review I2)
+                                 # anywhere: the patch also drops rom in start-up while AEN (phase 9), so the start-up check ('rom low')
+                                 # prints first on the same clock as this fault's own check
+                                 ('dma_rom_from_ram',
+                                  'ERROR: glue: rom: not E000-FFFF of the system address (every address in start-up)', 'anywhere'),
+                                 # the window's data dropped (FFh): the sweep's CPU reads of A000-BFFF (final review (B), I3)
+                                 ('ext_di_ignored', 'ERROR: glue: CPU D input: not the device at its address')]),
 }  # the tasks that add testbenches add their entries
 
 
@@ -258,7 +297,7 @@ def run(name, test, tools, mem=None, frames=None, fault=None):
         except (ValueError, OSError) as e:
             return None, 'ERROR: fault %s: %s' % (fault, e)
     params = dict(test.get('params', {}))
-    if frames is not None:
+    if frames is not None and test.get('frames'):
         params['FRAMES'] = frames
     top = test['top']
     exe = os.path.join(out, name + '.vvp')
@@ -274,6 +313,20 @@ def run(name, test, tools, mem=None, frames=None, fault=None):
     ok = (res.returncode == 0 and any(l.startswith('PASS') for l in lines)
           and not any(l.startswith('ERROR') or 'FATAL' in l for l in lines))
     return ok, text
+
+
+def first_error(text):
+    """The first line of a run's output that starts with ERROR or contains FATAL (stripped), or None."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith('ERROR') or 'FATAL' in line:
+            return line
+    return None
+
+
+def contains(text, expected):
+    """True when text contains expected; '*' in expected matches any characters."""
+    return re.search('.*'.join(re.escape(part) for part in expected.split('*')), text) is not None
 
 
 def main():
@@ -315,10 +368,20 @@ def main():
             print(text.rstrip())
             failed += 1
         if a.negative:
-            for fault, expected in test.get('negatives', []):
+            for entry in test.get('negatives', []):
+                fault, expected = entry[0], entry[1]
+                anywhere = len(entry) > 2 and entry[2] == 'anywhere'
+                patch = os.path.join(ROOT, NEGATIVE_DIR, fault + '.patch')
+                if a.mem and os.path.isfile(patch) and all(rel == MEM for rel in patched_files(patch)):
+                    # the patched file is replaced by --mem (e.g. mem16_dropped_after_rd on tb_rk86_mem16.v)
+                    print('%s: negative %s SKIPPED (--mem: it patches only %s)' % (name, fault, MEM))
+                    continue
                 bad, text = run(name, test, tools, a.mem, a.frames, fault)
-                caught = bad is False and expected in text
-                print('%s: negative %s %s' % (name, fault, 'FAILED as expected' if caught else 'NOT CAUGHT (expected: %s)' % expected))
+                first = first_error(text)
+                caught = bad is False and contains(text if anywhere else first or '', expected)
+                print('%s: negative %s %s' % (name, fault, 'FAILED as expected' if caught else
+                                              'NOT CAUGHT (expected%s: %s; first error: %s)'
+                                              % (' anywhere' if anywhere else '', expected, first or '(none)')))
                 if not caught:
                     print(text.rstrip())
                     failed += 1

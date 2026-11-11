@@ -19,7 +19,12 @@
 // strobes forced inactive) and counts the selects of every range, so the decoder edges (7FFF / 8000,
 // 9FFF / A000, BFFF / C000, DFFF / E000) are checked whatever the boot does; last, two passes with AEN
 // forced high and the 8257 address below 8000 while the CPU address sweeps 0000-FFFF: nothing answers
-// (the decoder takes the system address, GLUE-13). The forces are never released: the sweep stays last.
+// (the decoder takes the system address, GLUE-13); then one read pass (phase 8) with AEN forced high and
+// the 8257 address over 0000-FFFF: the decoder, rom and the 8275's data input follow the 8257 address
+// (the device there, as for a CPU read: GLUE-1, GLUE-2, GLUE-3, GLUE-10; the monitor at E000-FFFF; the
+// monitor itself never points the 8257 outside the RAM). The forces are never released: the sweep stays
+// last. The window A000-BFFF answers ext_di, a function of bus_a, so the CPU reads of the sweep (8192 at
+// A000-BFFF) and the DMA read pass check its data path at every address.
 // Plusargs: +bios=<hex, 2048 bytes> +font=<hex, 1024 bytes> ($readmemh; run_machine16_sim.py writes them).
 // Compile cpu_power_up.vh (the macro CPU16_ZERO) before this file.
 `default_nettype none
@@ -50,7 +55,7 @@ reg   [7:0] font_data = 8'h00;
 reg   [7:0] kbd_cols = 8'hFF;
 reg   [2:0] kbd_shift = 3'b111;
 reg         tape_in = 1'b0;
-reg   [7:0] ext_di = 8'hFF;
+wire  [7:0] ext_di;                 // the window A000-BFFF: a function of its address (not a constant)
 rk86_machine16 dut(.clk(clk), .ce16(ce16), .reset(reset), .cpu_a(cpu_a), .bus_a(bus_a), .cpu_do(cpu_do),
     .mem_rd(mem_rd), .cpu_wr_n(cpu_wr_n), .rom(rom), .startup(startup), .aen(aen), .mem_di(mem_di),
     .ppa_pa(ppa_pa), .kbd_cols(kbd_cols), .kbd_shift(kbd_shift), .tape_in(tape_in), .pc0(pc0), .inte(inte),
@@ -58,6 +63,9 @@ rk86_machine16 dut(.clk(clk), .ce16(ce16), .reset(reset), .cpu_a(cpu_a), .bus_a(
     .ext_we_n(ext_we_n), .ext_rd_n(ext_rd_n), .ext_di(ext_di));
 tb_rk86_mem16 mem(.clk(clk), .bus_a(bus_a), .cpu_do(cpu_do), .cpu_wr_n(cpu_wr_n), .rom(rom), .aen(aen),
     .mem_rd(mem_rd), .mem_di(mem_di));
+// the window's data at its address bus_a, every bit from the address, so a read that does not take the window's
+// data, or takes it for another address, differs (the CPU reads of the sweep, the DMA read pass, the samples)
+assign ext_di = bus_a[7:0] ^ {bus_a[12:8], 3'b101};
 reg [7:0] font [0:1023];
 always @(posedge clk) font_data <= font[font_addr];        // latency 1 clk
 
@@ -111,7 +119,11 @@ initial for (k0 = 0; k0 < 8; k0 = k0 + 1) begin
     c_din_mem[k0] = 0; c_din_ppa[k0] = 0; c_din_ext[k0] = 0; c_din_crt[k0] = 0;
 end
 reg su_q = 1'b1;
-reg [7:0] x_din;
+reg [7:0] x_din, x_bdin;
+// phase 8 (AEN forced, the 8257 address over 0000-FFFF): samples, rom high, the 8275 data source per 8 KB range
+integer c_aen8 = 0, c_rom8 = 0;
+integer c_d8 [0:7];
+initial for (k0 = 0; k0 < 8; k0 = k0 + 1) c_d8[k0] = 0;
 
 //---------------- the glue, at every clk (sampled at the falling edge, between the enables)
 always @(negedge clk) begin
@@ -137,16 +149,15 @@ always @(negedge clk) begin
         if (!dut.crt.cs_n) gerr("start-up: the 8275 selected");
         if (!dut.dma.cs_n) gerr("start-up: the 8257 selected");
         if (!dut.ext_we_n || !dut.ext_rd_n) gerr("start-up: a window strobe low");
-        if (!dut.dma.aen && !dut.rom) gerr("start-up: rom low");
+        if (!dut.rom) gerr("start-up: rom low");
     end
-    // GLUE-13: no device answers a DMA address; the memory gives RAM (rom low)
+    // GLUE-13: no device answers a DMA address below 8000; the memory gives RAM there (rom low, checked below)
     if (dut.dma.aen) begin
         if (dut.dma.a_o < 16'h8000) begin
             if (phase == 0) c_dma_a = c_dma_a + 1;
             if (!dut.ppa.cs_n || !dut.crt.cs_n || !dut.dma.cs_n || !dut.ext_we_n || !dut.ext_rd_n)
                 gerr("a device selected by the DMA address");
         end
-        if (dut.rom) gerr("rom high while AEN");
         if (!dut.crt.rd_n) c_dma_rd = c_dma_rd + 1;
         if (!dut.crt.wr_n) c_dma_wr = c_dma_wr + 1;
     end
@@ -161,8 +172,9 @@ always @(negedge clk) begin
     if (dut.ppa.cs_n !== !x_ppa) gerr("8255 CS: not 8000-9FFF");
     if (dut.crt.cs_n !== !x_crt) gerr("8275 CS: not C000-DFFF");
     if (dut.dma.cs_n !== !x_top) gerr("8257 CS: not E000-FFFF");
-    if (dut.rom !== (!dut.dma.aen && (dut.startup || x_bus[15:13] == 3'b111)))
-        gerr("rom: not E000-FFFF (every address in start-up) without AEN");
+    // the monitor ROM's select (GLUE-1, GLUE-2): Y7 of D11 on the system address, every address in start-up
+    if (dut.rom !== (dut.startup || x_bus[15:13] == 3'b111))
+        gerr("rom: not E000-FFFF of the system address (every address in start-up)");
     // ЧТЕНИЕ = DBIN XOR MEMW (GLUE-3), to the memory, the 8255 RD and the 8275 RD
     if (dut.crt.rd_n !== x_rd_n) gerr("8275 RD: not DBIN XOR MEMW");
     if (dut.mem_rd !== !dut.crt.rd_n) gerr("mem_rd: not READ");
@@ -177,9 +189,22 @@ always @(negedge clk) begin
     // the window A000-BFFF (Y5)
     if (dut.ext_we_n !== !(x_ext && !dut.cpu.pin_wr_n)) gerr("ext_we_n: not CPU WR in A000-BFFF");
     if (dut.ext_rd_n !== !(x_ext && !x_rd_n)) gerr("ext_rd_n: not READ in A000-BFFF");
-    // the data paths: the 8275 takes the memory while AEN (GLUE-13), else the CPU's data
-    if (dut.crt.d_i !== (dut.dma.aen ? mem.mem_di : dut.cpu.pin_dout))
-        gerr(dut.dma.aen ? "8275 D: not the memory while AEN" : "8275 D: not the CPU data");
+    // the data paths: while AEN the 8275 takes the device at the system address, as a CPU read there would
+    // (GLUE-1, GLUE-3, GLUE-10: the decoder and ЧТЕНИЕ act on the 8257's address), else the CPU's data
+    if (dut.startup) x_bdin = mem.mem_di;
+    else case (x_bus[15:13])
+        3'b100:  x_bdin = dut.ppa.d_o;
+        3'b101:  x_bdin = ext_di;
+        3'b110:  x_bdin = dut.crt.d_o;
+        default: x_bdin = mem.mem_di;
+    endcase
+    if (dut.crt.d_i !== (dut.dma.aen ? x_bdin : dut.cpu.pin_dout))
+        gerr(dut.dma.aen ? "8275 D: not the device at the system address while AEN" : "8275 D: not the CPU data");
+    if (phase == 8 && dut.dma.aen) begin
+        c_aen8 = c_aen8 + 1;
+        if (dut.rom) c_rom8 = c_rom8 + 1;
+        if (!dut.startup) c_d8[x_bus[15:13]] = c_d8[x_bus[15:13]] + 1;
+    end
     if (dut.ppa.d_i !== dut.cpu.pin_dout) gerr("8255 D: not the CPU data");
     if (dut.dma.d_i !== dut.cpu.pin_dout) gerr("8257 D: not the CPU data");
     if (dut.cpu.pin_dbin) begin                                           // what the CPU reads
@@ -704,7 +729,7 @@ task sweep(input integer ph, input su, input rd);
         phase = 9; sw_su = su; sw_rd = rd; sw_wr_n = rd;
         @(posedge clk);
         for (k = 0; k < 65536; k = k + 1) begin
-            sw_a = k; sw_dma = {1'b0, ~k[14:0]}; phase = ph;
+            sw_a = k; sw_dma = ph == 8 ? ~k[15:0] : {1'b0, ~k[14:0]}; phase = ph;
             @(posedge clk);
         end
         phase = 9;
@@ -799,6 +824,16 @@ initial begin
         expect_count("DMA address: CS", c_ppa[6] + c_crt[6] + c_dma[6] + c_ppa[7] + c_crt[7] + c_dma[7], 0);
         expect_count("DMA address: window strobes", c_rdr[6] + c_wer[6] + c_rdr[7] + c_wer[7], 0);
         expect_count("DMA address: rom", c_rom[6] + c_rom[7], 0);
+        // GLUE-1, GLUE-2, GLUE-3, GLUE-10: a DMA read over 0000-FFFF (reads only: a forced write would program
+        // the devices); the per-clk glue checks compare rom and the 8275's D input, these counts show the sweep
+        sweep(8, 1'b0, 1'b1);
+        expect_count("DMA read: samples", c_aen8, 65536);
+        expect_count("DMA read: rom (E000-FFFF)", c_rom8, 8192);
+        expect_count("DMA read: 8275 D from memory (0000-7FFF)", c_d8[0] + c_d8[1] + c_d8[2] + c_d8[3], 32768);
+        expect_count("DMA read: 8275 D from the 8255", c_d8[4], 8192);
+        expect_count("DMA read: 8275 D from the window", c_d8[5], 8192);
+        expect_count("DMA read: 8275 D from the 8275", c_d8[6], 8192);
+        expect_count("DMA read: 8275 D from the monitor", c_d8[7], 8192);
         // GLUE-1: 8 KB each; start-up: none, the monitor at every address
         expect_count("8255 CS, reads", c_ppa[1], 8192);     expect_count("8255 CS, writes", c_ppa[2], 8192);
         expect_count("8275 CS, reads", c_crt[1], 8192);     expect_count("8275 CS, writes", c_crt[2], 8192);

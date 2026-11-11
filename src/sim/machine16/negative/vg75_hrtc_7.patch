@@ -1,9 +1,9 @@
 diff --git a/src/rtl/rk86_16/k580vg75.v b/src/rtl/rk86_16/k580vg75.v
-index f600ba3..6289b4e 100644
+index 06602bc..502e7d1 100644
 --- a/src/rtl/rk86_16/k580vg75.v
 +++ b/src/rtl/rk86_16/k580vg75.v
-@@ -89,7 +89,7 @@ reg [6:0] rw = 7'd0;           // row counter: 0..R display, R+1..R+VV+1 retrace
- reg [5:0] frame = 6'd0;        // VRTC count, for blinking
+@@ -91,7 +91,7 @@ reg [6:0] rw = 7'd0;           // row counter: 0..R display, R+1..R+VV+1 retrace
+ reg [4:0] frame = 5'd0;        // VRTC count, for blinking (bits 4 and 3)
  reg       preset = 1'b0, hold = 1'b0, rel = 1'b0;
  wire [7:0] h_last = {1'b0, p_h};
 -wire [7:0] line_last = h_last + {3'b000, p_z, 1'b0} + 8'd2;
