@@ -30,7 +30,8 @@
 //     formats; blinking; spaced rows; top / bottom blanking for UUUU >= 8; light pen registers
 //   - underrun from the buffer count (not from DRQ): DU; the screen blanked until the row 0 start, the DMA stopped
 //     until the start of the last retrace row, whose row 0 fill runs as in every frame ([D79] 1-180 "until after the
-//     vertical retrace interval"; S11 decided 2026-11-11 by D11, spec 4.4: the board's picture is aligned after boot)
+//     vertical retrace interval"; S11 decided 2026-11-11 by D11, spec 4.4: the board's picture is aligned after boot;
+//     approved for now, to be checked on a real 8275 with a logic analyser: README.md, "Follow-up")
 //   - the power-up state = the state after the Reset command (display, interrupts and DMA off, flags 0,
 //     VSP high; parameters, counters and cursor 0); the plain 8275, not the 8275-2; SILENT items marked
 `default_nettype none
