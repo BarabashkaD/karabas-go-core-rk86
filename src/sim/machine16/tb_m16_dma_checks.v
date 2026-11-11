@@ -18,10 +18,17 @@
 //    address is latched at its ADSTB rise (theta-up of S1, rel 4); from the clk after it until AEN falls
 //    or the next ADSTB rise (the update at theta-up after S4, rel 40) the 8257 address and the system
 //    address must stay at it, through the IOR rise ([C78] TAHR); it must have A15 = 0 (a RAM address)
-//    and follow the monitor's channel 2 block (BIOS 0x2E7-0x2FA): DMA byte n since the boot is block
-//    transfer k = n mod 2340 at 76D0h + k (the autoload from channel 3 restarts it at 76D0h); and the
-//    first DMA byte of every frame from fa on (the row 0 fill in the retrace row) must be block transfer
-//    0 (the 8257 in step with the frame) (all ERROR: dma byte). Each kind counts its mismatches without
+//    and follow the channel 2 block the CPU programmed last (the monitor's BIOS 0x2E7-0x2FA: 76D0h, 2340
+//    transfers, autoload): the block restarts at every CPU write to the 8257 mode register that enables
+//    channel 2 (mode bit 2; the monitor writes A4h, and runs its video init twice during the boot: CALL
+//    FACE at F83E and at F858), with the address and the count (low 14 bits + 1) the CPU wrote to channel
+//    2 through the first / last flip-flop (modelled from the CPU's writes, not read from the 8257); DMA
+//    byte n since the restart is block transfer k = n mod length at base + k (the autoload repeats it);
+//    and the first DMA byte of every frame from fa on (the row 0 fill in the retrace row) must be block
+//    transfer 0 (the 8257 in step with the frame) (all ERROR: dma byte). The frame start is checked only
+//    for a frame that starts after the last enabling mode write with no 8275 Reset command (00h written
+//    with A0 = 1) since that write: an 8275 Reset kills the fill in progress, so the 8257 is legitimately
+//    out of step with the rows until the monitor reprograms it (INFO for each frame not checked). Each kind counts its mismatches without
 //    stopping the run (each kind printed at most 10 times, one summary error each at the end), so a fault
 //    that breaks several shows them all. The clk where HLDA rises inside T3 and the clk where AEN rises
 //    are counted (and checked when the CPU samples there).
@@ -52,7 +59,7 @@ localparam integer DOTS = 516 * 310;
 localparam integer NF = 64;              // frames in stats.txt
 localparam integer PRINTS = 10;          // mismatch lines per kind
 localparam [15:0] X_BASE = 16'h76D0;     // the monitor's channel 2 block: 76D0h, 2340 transfers, autoload
-localparam integer X_BLOCK = 2340;
+localparam integer X_BLOCK = 2340;       // (the block until the first enabling mode write; no DMA before it)
 
 wire clk = `M16.clk;
 
@@ -78,6 +85,12 @@ reg [6:0] rw_q = 7'd0;
 reg [15:0] xa = 16'h0000, xe;
 reg adstb_q = 1'b0, xa_on = 1'b0, xa_ok = 1'b0, xa_rep = 1'b0;
 integer xk, a_bad = 0, q_bad = 0, f_bad = 0, n_ad = 0, n_hold = 0, n_fs = 0, fs_fr = -1;
+// the channel 2 block the CPU programmed: its writes to the 8257 (E000-FFFF) and the 8275 (C000-DFFF),
+// latched while WR is low and taken at the WR rise (as the chips do), AEN low and start-up off
+reg [15:0] p_ad2 = 16'h0000, p_tr2 = 16'h0000, q_base = X_BASE, w_a;
+reg [7:0] w_d;
+reg w_on = 1'b0, wr_q = 1'b1, p_ff = 1'b0, m_seen = 1'b0, c_rst = 1'b0, fs_ok = 1'b0;
+integer q_n = 0, q_len = X_BLOCK, n_rp = 0, n_cr = 0, n_fs_skip = 0, fr_q = -1;
 reg win = 1'b0, win_end = 1'b0, fin = 1'b0;
 integer obs = 0, fr = -1, hl_cur = 0, last_byte = 0, row_x = 0;
 // the window, frames fa .. fa + 2
@@ -158,14 +171,15 @@ task final_checks;
             err; end
         if (s_bad != 0) begin $display("ERROR: sample: %0d mismatches in all", s_bad); err; end
         if (d_bad != 0) begin $display("ERROR: dma byte: %0d mismatches of %0d DMA bytes", d_bad, d_n); err; end
-        $display("INFO: machine16: DMA addresses: %0d latched at ADSTB, %0d clk held, %0d frame starts checked",
-                 n_ad, n_hold, n_fs);
+        $display("INFO: machine16: DMA addresses: %0d latched at ADSTB, %0d clk held, %0d frame starts checked, %0d not checked; channel 2 block restarts %0d, 8275 Reset commands %0d",
+                 n_ad, n_hold, n_fs, n_fs_skip, n_rp, n_cr);
         if (a_bad != 0) begin $display("ERROR: dma byte: the DMA address moved after the ADSTB rise in %0d transfers", a_bad); err; end
         if (q_bad != 0) begin $display("ERROR: dma byte: %0d DMA bytes not at the address of the 8257 block", q_bad); err; end
         if (f_bad != 0) begin $display("ERROR: dma byte: %0d frames whose first DMA byte is not transfer 0 of the 8257 block", f_bad); err; end
-        if (d_n == 0 || n_ad != d_n || n_hold == 0 || (`M16.arm && n_fs != `M16.frame - `M16.fa)) begin
-            $display("ERROR: dma byte: %0d DMA bytes, %0d addresses latched, %0d clk held, %0d frame starts checked, expected %0d, %0d, nonzero, %0d",
-                     d_n, n_ad, n_hold, n_fs, d_n, d_n, `M16.arm ? `M16.frame - `M16.fa : 0); err; end
+        if (d_n == 0 || n_ad != d_n || n_hold == 0 || n_rp == 0
+            || (`M16.arm && (n_fs + n_fs_skip != `M16.frame - `M16.fa || n_fs == 0))) begin
+            $display("ERROR: dma byte: %0d DMA bytes, %0d addresses latched, %0d clk held, %0d block restarts, %0d frame starts checked + %0d not checked, expected %0d, %0d, nonzero, nonzero, nonzero + %0d in all",
+                     d_n, n_ad, n_hold, n_rp, n_fs, n_fs_skip, d_n, d_n, `M16.arm ? `M16.frame - `M16.fa : 0); err; end
         if (fb_written == 0) begin $display("ERROR: frame.hex: no complete frame captured"); err; end
         else $display("INFO: machine16: frame.hex: 516 x 310 dots from the VRTC fall at ce16 %0d (%0d frames written in turn)",
                       fb_from, fb_written);
@@ -190,7 +204,8 @@ endtask
 always @(posedge clk) if (!`M16.done && !fin) begin
     obs = obs + 1;
     fr = `M16.frame;
-    win = `M16.arm && fr >= `M16.fa && fr <= `M16.fa + 2;
+    if (fr != fr_q) begin fs_ok = m_seen && !c_rst; fr_q = fr; end   // a frame starts: its start checked?
+    win =`M16.arm && fr >= `M16.fa && fr <= `M16.fa + 2;
     if (win && w_from < 0) w_from = `M16.n16;
     if (`M16.arm && !win_end && fr == `M16.fa + 3) begin win_end = 1'b1; window_checks; end
     //---- DMA cost
@@ -222,6 +237,35 @@ always @(posedge clk) if (!`M16.done && !fin) begin
         ram[`D16.cpu.pin_a[14:0]] = `D16.cpu.pin_dout;
         wrt[`D16.cpu.pin_a[14:0]] = 1'b1;
     end
+    //---- the CPU's writes to the 8257 and the 8275: the channel 2 block, its restarts, the 8275 Reset
+    if (`D16.clocks.reset) p_ff = 1'b0;                          // the 8257 RESET clears the first / last flip-flop
+    if (!`D16.cpu.pin_wr_n) begin
+        w_on = !`D16.startup && !`D16.dma.aen; w_a = `D16.bus_a; w_d = `D16.cpu.pin_dout;
+    end else if (!wr_q && w_on && !`D16.clocks.reset) begin     // the WR rise: the write completes
+        if (w_a[15:13] == 3'b111) begin                             // the 8257 (A3-A0)
+            if (w_a[3]) begin
+                if (w_a[2:0] == 3'd0) begin                         // the mode register
+                    p_ff = 1'b0;
+                    if (w_d[2]) begin                               // channel 2 enabled: its block restarts
+                        q_base = p_ad2; q_len = p_tr2[13:0] + 1; q_n = 0;
+                        m_seen = 1'b1; c_rst = 1'b0; fs_ok = 1'b0; n_rp = n_rp + 1;
+                        $display("INFO: dma byte: 8257 mode %h: the channel 2 block restarts at %h, %0d transfers (ce16 %0d, frame %0d)",
+                                 w_d, q_base, q_len, `M16.n16, fr);
+                    end
+                end
+            end else begin
+                if (w_a[2:1] == 2'd2) begin
+                    if (w_a[0]) begin if (p_ff) p_tr2[15:8] = w_d; else p_tr2[7:0] = w_d; end
+                    else begin if (p_ff) p_ad2[15:8] = w_d; else p_ad2[7:0] = w_d; end
+                end
+                p_ff = !p_ff;
+            end
+        end else if (w_a[15:13] == 3'b110 && w_a[0] && w_d == 8'h00) begin     // the 8275 Reset command
+            c_rst = 1'b1; fs_ok = 1'b0; n_cr = n_cr + 1;
+            $display("INFO: dma byte: 8275 Reset command (ce16 %0d, frame %0d)", `M16.n16, fr);
+        end
+    end
+    wr_q = `D16.cpu.pin_wr_n;
     //---- the CPU's samples
     smp_db = `D16.cpu.dbin_pin;
     smp_op = !`D16.clocks.f2 && (`D16.cpu.reset || (`D16.cpu.m1 && `D16.cpu.t3));
@@ -279,9 +323,10 @@ always @(posedge clk) if (!`M16.done && !fin) begin
         if (fr >= 0 && fr < NF) st_xfer[fr] = st_xfer[fr] + 1;
         last_byte = `M16.n16;
         row_x = row_x + 1;
-        // the address: latched, a RAM address, the monitor's block; the frame's first byte is transfer 0
-        xk = (d_n - 1) % X_BLOCK;
-        xe = X_BASE + xk;
+        // the address: latched, a RAM address, the programmed block; the frame's first byte is transfer 0
+        xk = q_n % q_len;
+        xe = q_base + xk;
+        q_n = q_n + 1;
         if (xa_ok) n_ad = n_ad + 1;
         if (!xa_ok || xa[15] || xa !== xe) begin
             q_bad = q_bad + 1;
@@ -290,17 +335,23 @@ always @(posedge clk) if (!`M16.done && !fin) begin
                                      d_n, `M16.n16, fr);
                 else if (xa[15]) $display("ERROR: dma byte: DMA byte %0d at %h: not a RAM address (A15 set), expected %h (ce16 %0d, frame %0d)",
                                           d_n, xa, xe, `M16.n16, fr);
-                else $display("ERROR: dma byte: DMA byte %0d at %h, expected %h (76d0 + transfer %0d of the 8257 block of %0d, autoload; ce16 %0d, frame %0d)",
-                              d_n, xa, xe, xk, X_BLOCK, `M16.n16, fr);
+                else $display("ERROR: dma byte: DMA byte %0d at %h, expected %h (%h + transfer %0d of the 8257 block of %0d, autoload; ce16 %0d, frame %0d)",
+                              d_n, xa, xe, q_base, xk, q_len, `M16.n16, fr);
             end
         end
         if (`M16.arm && fr >= `M16.fa && fr != fs_fr) begin
-            fs_fr = fr; n_fs = n_fs + 1;
-            if (xk != 0) begin
-                f_bad = f_bad + 1;
-                if (f_bad <= PRINTS)
-                    $display("ERROR: dma byte: frame %0d: its first DMA byte (the row 0 fill) is transfer %0d of the 8257 block (%h), expected transfer 0 at 76d0: the 8257 out of step with the frame (ce16 %0d)",
-                             fr, xk, xe, `M16.n16);
+            fs_fr = fr;
+            if (!fs_ok) begin
+                n_fs_skip = n_fs_skip + 1;
+                $display("INFO: dma byte: frame %0d start not checked (the 8257 or the 8275 reprogrammed)", fr);
+            end else begin
+                n_fs = n_fs + 1;
+                if (xk != 0) begin
+                    f_bad = f_bad + 1;
+                    if (f_bad <= PRINTS)
+                        $display("ERROR: dma byte: frame %0d: its first DMA byte (the row 0 fill) is transfer %0d of the 8257 block (%h), expected transfer 0 at %h: the 8257 out of step with the frame (ce16 %0d)",
+                                 fr, xk, xe, q_base, `M16.n16);
+                end
             end
         end
         xa_ok = 1'b0;
