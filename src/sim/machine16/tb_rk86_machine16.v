@@ -307,6 +307,14 @@ always @(negedge clk)
 // row 29) has no fill. A burst ends at a DRQ-low gap longer than 48 ce16; a DRQ rise after a shorter gap
 // continues the burst only when it comes with the WR rise (within 2 clk, the 8275 tWQ re-raise; the
 // unit TB's rule), else it is a burst space that is too short.
+// The 8275 Reset command (a CPU write of 00h with A0 = 1 to C000-DFFF, AEN low, start-up off, taken at
+// the WR rise as tb_m16_dma_checks.v takes it): the monitor's second video init (CALL FACE at F858) sends
+// it during the frames, and it stops the DMA of the fill in progress (data sheet: Reset ... DMA stops); the
+// Start Display that follows starts the next row's fill normally. The TB row in which it comes is excluded
+// from the per-row checks (transfers, bursts, burst length, burst space, dma period, the first row) and
+// its frame from the per-frame checks (transfers, hold periods, aen per transfer, drq at s4); the end
+// totals count only the checked rows and frames, each Reset excludes at most one row and one frame, and
+// at least one row fill and one frame must be checked (INFO for each row excluded).
 localparam integer PHI16 = 9;                       // a T-state, f1 to f1
 localparam integer LINE16 = 1032, HRTC16 = 96;      // 86 and 8 CCLK
 localparam integer LINES = 310, ROW_LINES = 10, ROWS = 31, VRTC16 = 10320;
@@ -333,6 +341,13 @@ reg b_open = 1'b0, b_long = 1'b0, s1_first = 1'b0, si_miss = 1'b0, s4_pend = 1'b
 integer s1_at = -1, aen_at = -1;
 integer n_xfer = 0, n_bursts = 0, n_space = 0, n_per = 0, n_irt = 0, n_hlda = 0, n_aenup = 0, n_s4 = 0, n_h4 = 0;
 integer margin_min = 0, margin_row = -1;
+// the 8275 Reset command and the rows and frames it cuts; the row's counts, added to the totals at its end
+// when the row is checked (r_*), the frame's at its end when the frame is checked (c_xfer, n_s4, n_h4)
+reg cr_on = 1'b0, cr_wq = 1'b1, r_cut = 1'b0, f_cut = 1'b0, r0_cut = 1'b0;
+reg [15:0] cr_a = 16'h0000;
+reg  [7:0] cr_d = 8'h00;
+integer n_crt = 0, n_crt_t = 0, cr_at = -1, n_rcut = 0, n_rcut_f = 0, n_fcut = 0, n_frow = 0, n_fchk = 0, c_xfer = 0;
+integer r_nb = 0, r_ns = 0, r_np = 0;
 integer hist [0:PER_MISS_MAX];
 integer hist_over = 0;
 integer e_kind [0:15];      // errors per check: phi, hrtc, frame, vrtc, transfers, aen per transfer, hold periods,
@@ -353,8 +368,8 @@ task b_close;
     begin
         if (b_open) begin
             b = row_bursts - 1;
-            n_bursts = n_bursts + 1;
-            if (b_len != exp_len(b) && !b_long) begin
+            r_nb = r_nb + 1;
+            if (b_len != exp_len(b) && !b_long && !r_cut) begin
                 $display("ERROR: burst length: frame %0d row %0d fill: burst %0d has %0d transfers, expected %0d (ce16 %0d)",
                          frame, r_idx, b, b_len, exp_len(b), n16); tfail(9);
             end
@@ -367,22 +382,32 @@ task row_end;
     integer ex, d;
     begin
         b_close;
-        ex = r_idx < ROWS - 1 ? XF_ROW : 0;
-        if (row_xfer != ex) begin
-            $display("ERROR: transfers: frame %0d row %0d: %0d transfers (IOR rises with DACK2), expected %0d (ce16 %0d)",
-                     frame, r_idx, row_xfer, ex, n16); tfail(4);
-        end
-        ex = r_idx < ROWS - 1 ? BURSTS : 0;
-        if (row_bursts != ex) begin
-            $display("ERROR: burst length: frame %0d row %0d fill: %0d bursts, expected %0d (ce16 %0d)",
-                     frame, r_idx, row_bursts, ex, n16); tfail(9);
-        end
-        if (row_xfer > 0) begin                 // from the last WR rise of the fill to the start of the row it fills
-            d = n16 - last_wr_at;
-            if (margin_row < 0 || d < margin_min) begin margin_min = d; margin_row = r_idx; end
+        if (r_cut) begin                        // cut by an 8275 Reset: not checked, not counted
+            n_rcut = n_rcut + 1;
+            if (r_idx < ROWS - 1) n_rcut_f = n_rcut_f + 1;
+            if (r_idx == 0) r0_cut = 1'b1;
+            $display("INFO: bus timing: frame %0d row %0d fill cut by an 8275 Reset (ce16 %0d): excluded", frame, r_idx, cr_at);
+        end else begin
+            ex = r_idx < ROWS - 1 ? XF_ROW : 0;
+            if (row_xfer != ex) begin
+                $display("ERROR: transfers: frame %0d row %0d: %0d transfers (IOR rises with DACK2), expected %0d (ce16 %0d)",
+                         frame, r_idx, row_xfer, ex, n16); tfail(4);
+            end
+            ex = r_idx < ROWS - 1 ? BURSTS : 0;
+            if (row_bursts != ex) begin
+                $display("ERROR: burst length: frame %0d row %0d fill: %0d bursts, expected %0d (ce16 %0d)",
+                         frame, r_idx, row_bursts, ex, n16); tfail(9);
+            end
+            if (row_xfer > 0) begin             // from the last WR rise of the fill to the start of the row it fills
+                d = n16 - last_wr_at;
+                if (margin_row < 0 || d < margin_min) begin margin_min = d; margin_row = r_idx; end
+            end
+            if (r_idx < ROWS - 1) n_frow = n_frow + 1;
+            n_bursts = n_bursts + r_nb; n_space = n_space + r_ns; n_per = n_per + r_np;
         end
         n_rows = n_rows + 1;
         row_xfer = 0; row_bursts = 0; b_open = 1'b0; b_len = 0; b_long = 1'b0;
+        r_nb = 0; r_ns = 0; r_np = 0; r_cut = 1'b0;
     end
 endtask
 // the end of a frame (a VRTC rise after the arming one)
@@ -392,15 +417,24 @@ task frame_end; begin
         $display("ERROR: frame: frame %0d: %0d HRTC rises and %0d ce16 between VRTC rises, expected %0d and %0d",
                  frame - 1, fr_lines, n16 - vr_at, LINES, FRAME16); tfail(2);
     end
-    if (fr_xfer != XF_FRAME) begin
-        $display("ERROR: transfers: frame %0d: %0d transfers, expected %0d", frame - 1, fr_xfer, XF_FRAME); tfail(4); end
-    if (fr_hrq != XF_FRAME || fr_h4 != XF_FRAME) begin
-        $display("ERROR: hold periods: frame %0d: %0d HRQ rises, %0d transfers with theta-up of S4 checked, expected %0d",
-                 frame - 1, fr_hrq, fr_h4, XF_FRAME); tfail(6); end
-    if (fr_aen != XF_FRAME) begin
-        $display("ERROR: aen per transfer: frame %0d: %0d AEN-high runs, expected %0d", frame - 1, fr_aen, XF_FRAME); tfail(5); end
-    if (fr_s4 != XF_FRAME) begin
-        $display("ERROR: drq at s4: frame %0d: %0d DRQ samples at S1 + %0d, expected %0d", frame - 1, fr_s4, S1_DRQ, XF_FRAME); tfail(7); end
+    if (f_cut) begin                            // a row fill cut by an 8275 Reset: the frame's counts not checked
+        n_fcut = n_fcut + 1;
+        $display("INFO: bus timing: frame %0d: a row fill cut by an 8275 Reset: the frame totals excluded (%0d transfers, %0d HRQ rises, %0d AEN-high runs, %0d DRQ samples at S1 + %0d)",
+                 frame - 1, fr_xfer, fr_hrq, fr_aen, fr_s4, S1_DRQ);
+    end else begin
+        n_fchk = n_fchk + 1;
+        c_xfer = c_xfer + fr_xfer; n_s4 = n_s4 + fr_s4; n_h4 = n_h4 + fr_h4;
+        if (fr_xfer != XF_FRAME) begin
+            $display("ERROR: transfers: frame %0d: %0d transfers, expected %0d", frame - 1, fr_xfer, XF_FRAME); tfail(4); end
+        if (fr_hrq != XF_FRAME || fr_h4 != XF_FRAME) begin
+            $display("ERROR: hold periods: frame %0d: %0d HRQ rises, %0d transfers with theta-up of S4 checked, expected %0d",
+                     frame - 1, fr_hrq, fr_h4, XF_FRAME); tfail(6); end
+        if (fr_aen != XF_FRAME) begin
+            $display("ERROR: aen per transfer: frame %0d: %0d AEN-high runs, expected %0d", frame - 1, fr_aen, XF_FRAME); tfail(5); end
+        if (fr_s4 != XF_FRAME) begin
+            $display("ERROR: drq at s4: frame %0d: %0d DRQ samples at S1 + %0d, expected %0d", frame - 1, fr_s4, S1_DRQ, XF_FRAME); tfail(7); end
+    end
+    f_cut = 1'b0;
     if (fr_ir != 1) begin
         $display("ERROR: irq: frame %0d: %0d IR set events, expected 1", frame - 1, fr_ir); tfail(12); end
     fr_lines = 0; fr_xfer = 0; fr_hrq = 0; fr_aen = 0; fr_s4 = 0; fr_h4 = 0; fr_ir = 0; vr_xfer = 0;
@@ -471,13 +505,13 @@ task bus_timing;
             if (vr_up) begin
                 if (!hr_up) begin $display("ERROR: vrtc: VRTC rose without an HRTC rise (ce16 %0d)", n16); tfail(3); end
                 frame_end;
-                vr_at = n16; row_line = 0; r_idx = 0;
+                vr_at = n16; row_line = 0; r_idx = 0; r0_cut = 1'b0;
             end
             if (vr_dn) begin
                 n_vw = n_vw + 1;
                 if (n16 - vr_at != VRTC16) begin
                     $display("ERROR: vrtc: VRTC high %0d ce16, expected %0d (frame %0d)", n16 - vr_at, VRTC16, frame); tfail(3); end
-                if (vr_xfer != XF_ROW) begin
+                if (vr_xfer != XF_ROW && !r0_cut && !(r_cut && r_idx == 0)) begin
                     $display("ERROR: first row: frame %0d: %0d transfers between VRTC rise and fall, expected %0d (the row 0 fill)",
                              frame, vr_xfer, XF_ROW); tfail(11); end
                 vf_at = n16;
@@ -496,12 +530,21 @@ task bus_timing;
             end
             ub_rep = ub_on && dut.crt.ublank;
         end
+        //---- the 8275 Reset command: the CPU write latched while WR is low, taken at the WR rise; from the
+        // arming point it cuts the fill of this TB row (r_cut) and this frame (f_cut)
+        if (!dut.cpu.pin_wr_n) begin
+            cr_on = !dut.startup && !dut.dma.aen; cr_a = dut.bus_a; cr_d = dut.cpu.pin_dout;
+        end else if (!cr_wq && cr_on && !dut.clocks.reset && cr_a[15:13] == 3'b110 && cr_a[0] && cr_d == 8'h00) begin
+            n_crt = n_crt + 1; cr_at = n16;
+            if (t_on) begin r_cut = 1'b1; f_cut = 1'b1; n_crt_t = n_crt_t + 1; end
+        end
+        cr_wq = dut.cpu.pin_wr_n;
         //---- DMA, from the arming point
         if (t_on) begin
             // the theta-up after S4 (S1 + 31): HRQ low (each character its own HOLD period: the 8275 DRQ is low
             // at S4, so HRQ falls); then the DRQ sampled at S1 + 27
             if (q_thu && s1_at >= 0 && n16 == s1_at + S1_HRQ) begin
-                fr_h4 = fr_h4 + 1; n_h4 = n_h4 + 1;
+                fr_h4 = fr_h4 + 1;
                 if (dut.dma.hrq) begin
                     $display("ERROR: hold periods: HRQ high after theta-up of S4 (S1 + %0d): the HOLD period goes on after the character (frame %0d row %0d, ce16 %0d)",
                              S1_HRQ, frame, r_idx, n16); tfail(6);
@@ -515,7 +558,7 @@ task bus_timing;
                 end
             end
             if (dut.dma.th_dn && s1_at >= 0) begin
-                if (n16 + 1 == s1_at + S1_DRQ) begin fr_s4 = fr_s4 + 1; n_s4 = n_s4 + 1; s4_pend = 1'b1; s4_drq = dut.crt.drq; end
+                if (n16 + 1 == s1_at + S1_DRQ) begin fr_s4 = fr_s4 + 1; s4_pend = 1'b1; s4_drq = dut.crt.drq; end
                 if (n16 + 1 == s1_at + S1_SI) si_miss = !dut.crt.drq;
             end
             // S1 (ADSTB rise - 4): the period within a burst
@@ -530,9 +573,9 @@ task bus_timing;
                 if (s1_first) s1_first = 1'b0;
                 else if (s1_at >= 0) begin
                     d = n16 - S1_ADSTB - s1_at;
-                    n_per = n_per + 1;
+                    r_np = r_np + 1;
                     if (d >= 0 && d <= PER_MISS_MAX) hist[d] = hist[d] + 1; else hist_over = hist_over + 1;
-                    if (d < PER_R || (!si_miss && d != PER_R && d != PER_W) || d > PER_MISS_MAX) begin
+                    if ((d < PER_R || (!si_miss && d != PER_R && d != PER_W) || d > PER_MISS_MAX) && !r_cut) begin
                         $display("ERROR: dma period: S1 to S1 %0d ce16 within burst %0d of the frame %0d row %0d fill (DRQ %0s at the SI sample), expected %0d or %0d (%0d..%0d after a missed SI sample) (ce16 %0d)",
                                  d, row_bursts - 1, frame, r_idx, si_miss ? "low" : "high", PER_R, PER_W, PER_R, PER_MISS_MAX, n16);
                         tfail(8);
@@ -546,19 +589,19 @@ task bus_timing;
                 if (!b_open) b_new;                                          // the first burst of the row fill
                 else if (n16 - drq_fall_at > GAP16) begin                    // a new burst
                     b_close;
-                    n_space = n_space + 1;
+                    r_ns = r_ns + 1;
                     d = n16 - last_wr_at;
-                    if (d < SPACE_MIN || d > SPACE_MAX) begin
+                    if ((d < SPACE_MIN || d > SPACE_MAX) && !r_cut) begin
                         $display("ERROR: burst space: frame %0d row %0d fill: DRQ %0d ce16 after the last WR rise of burst %0d, expected %0d..%0d (ce16 %0d)",
                                  frame, r_idx, d, row_bursts - 1, SPACE_MIN, SPACE_MAX, n16); tfail(10);
                     end
                     b_new;
                 end else begin                                               // the burst goes on
-                    if (clkn - wr_clk > 2) begin
+                    if (clkn - wr_clk > 2 && !r_cut) begin
                         $display("ERROR: burst space: frame %0d row %0d fill: DRQ back %0d ce16 after the WR rise of transfer %0d of burst %0d, expected with the WR rise (the burst goes on) or %0d..%0d later (a burst space) (ce16 %0d)",
                                  frame, r_idx, n16 - last_wr_at, b_len, row_bursts - 1, SPACE_MIN, SPACE_MAX, n16); tfail(10);
                     end
-                    if (b_len >= exp_len(row_bursts - 1) && !b_long) begin
+                    if (b_len >= exp_len(row_bursts - 1) && !b_long && !r_cut) begin
                         b_long = 1'b1;
                         $display("ERROR: burst length: frame %0d row %0d fill: DRQ again after transfer %0d of burst %0d, expected a burst of %0d (ce16 %0d)",
                                  frame, r_idx, b_len, row_bursts - 1, exp_len(row_bursts - 1), n16); tfail(9);
@@ -612,6 +655,8 @@ task bus_summary;
         $display("INFO: smallest DMA margin %0d ce16 (row %0d)", margin_min, margin_row);
         $display("INFO: machine16: bus timing: %0d frames, %0d rows, %0d lines, %0d transfers, %0d bursts, %0d burst spaces, %0d periods, %0d S4 samples, %0d IR, %0d T-states, %0d HLDA rises, %0d AEN rises",
                  n_frames, n_rows, n_line, n_xfer, n_bursts, n_space, n_per, n_s4, n_irt, n_phi, n_hlda, n_aenup);
+        $display("INFO: machine16: bus timing: 8275 Reset commands %0d (%0d from the arming point); excluded %0d rows (%0d with a fill), %0d frames; checked %0d row fills, %0d frames, %0d transfers in them",
+                 n_crt, n_crt_t, n_rcut, n_rcut_f, n_fcut, n_frow, n_fchk, c_xfer);
         if (nf < 1 || n_frames != nf) begin
             $display("ERROR: frame: %0d frames checked, expected %0d (armed at frame %0d)", n_frames, nf, fa); tfail(2); end
         if (n_phi == 0 || n16 + 1 - f1_at > PHI16 || f1_first - f0_at > PHI16) begin
@@ -619,23 +664,29 @@ task bus_summary;
         if (n_line != nf * LINES || n_hw != nf * LINES) begin
             $display("ERROR: hrtc: %0d lines, %0d HRTC widths checked, expected %0d", n_line, n_hw, nf * LINES); tfail(1); end
         if (n_vw != nf) begin $display("ERROR: vrtc: %0d VRTC widths checked, expected %0d", n_vw, nf); tfail(3); end
-        if (n_rows != nf * ROWS || n_xfer != nf * XF_FRAME) begin
-            $display("ERROR: transfers: %0d rows, %0d transfers checked, expected %0d, %0d", n_rows, n_xfer, nf * ROWS, nf * XF_FRAME); tfail(4); end
-        if (n_bursts != nf * (ROWS - 1) * BURSTS) begin
-            $display("ERROR: burst length: %0d bursts checked, expected %0d", n_bursts, nf * (ROWS - 1) * BURSTS); tfail(9); end
-        if (n_space != nf * (ROWS - 1) * (BURSTS - 1)) begin
-            $display("ERROR: burst space: %0d burst spaces checked, expected %0d", n_space, nf * (ROWS - 1) * (BURSTS - 1)); tfail(10); end
-        if (n_per != nf * (ROWS - 1) * (XF_ROW - BURSTS)) begin
+        // only the checked rows and frames on both sides; each 8275 Reset from the arming point excludes at
+        // most its row and its frame, and at least one row fill and one frame are checked
+        if (n_rows != nf * ROWS || c_xfer != n_fchk * XF_FRAME || n_fchk + n_fcut != nf || n_fcut > n_crt_t || n_fchk == 0) begin
+            $display("ERROR: transfers: %0d rows, %0d transfers checked in %0d frames, expected %0d, %0d (%0d frames, %0d excluded of at most %0d)",
+                     n_rows, c_xfer, n_fchk, nf * ROWS, n_fchk * XF_FRAME, nf, n_fcut, n_crt_t); tfail(4); end
+        if (n_frow + n_rcut_f != nf * (ROWS - 1) || n_rcut > n_crt_t || n_frow == 0) begin
+            $display("ERROR: transfers: %0d row fills checked, %0d excluded (%0d rows of at most %0d), expected %0d in all, at least one checked",
+                     n_frow, n_rcut_f, n_rcut, n_crt_t, nf * (ROWS - 1)); tfail(4); end
+        if (n_bursts != n_frow * BURSTS) begin
+            $display("ERROR: burst length: %0d bursts checked, expected %0d", n_bursts, n_frow * BURSTS); tfail(9); end
+        if (n_space != n_frow * (BURSTS - 1)) begin
+            $display("ERROR: burst space: %0d burst spaces checked, expected %0d", n_space, n_frow * (BURSTS - 1)); tfail(10); end
+        if (n_per != n_frow * (XF_ROW - BURSTS)) begin
             $display("ERROR: dma period: %0d periods within bursts (histogram %0d), expected %0d", n_per, tot,
-                     nf * (ROWS - 1) * (XF_ROW - BURSTS)); tfail(8); end
+                     n_frow * (XF_ROW - BURSTS)); tfail(8); end
         // both periods seen: 72 (the CPU's resumed cycle read-type) and 81 (write-type), so neither is vacuous
         if (hist[PER_R] == 0 || hist[PER_W] == 0) begin
             $display("ERROR: dma period: %0d periods of %0d ce16 and %0d of %0d, expected both nonzero",
                      hist[PER_R], PER_R, hist[PER_W], PER_W); tfail(8); end
         if (n_ub == 0) begin $display("ERROR: underrun: ublank never checked (no row 0 start after the arming point)"); tfail(13); end
-        if (n_s4 != nf * XF_FRAME || n_h4 != nf * XF_FRAME) begin
+        if (n_s4 != n_fchk * XF_FRAME || n_h4 != n_fchk * XF_FRAME) begin
             $display("ERROR: drq at s4: %0d DRQ samples at S1 + %0d, %0d HRQ samples at S1 + %0d, expected %0d", n_s4, S1_DRQ,
-                     n_h4, S1_HRQ, nf * XF_FRAME); tfail(7); end
+                     n_h4, S1_HRQ, n_fchk * XF_FRAME); tfail(7); end
         if (n_irt != nf) begin $display("ERROR: irq: %0d IR times checked, expected %0d", n_irt, nf); tfail(12); end
         if (margin_row < 0) begin $display("ERROR: transfers: no DMA margin measured"); tfail(4); end
         if (n_hlda == 0) begin $display("ERROR: hold in a write: no HLDA rise seen"); tfail(14); end

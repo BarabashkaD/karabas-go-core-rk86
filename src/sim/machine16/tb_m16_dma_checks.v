@@ -8,7 +8,9 @@
 // 1. DMA cost over the three frames fa, fa + 1, fa + 2 (from the arming VRTC rise; the Global
 //    Constraints): ce16 with AEN high 280 800 = 3 x 2340 x 40 (ERROR: dma cost); HOLD (HRQ) rises 7020
 //    (ERROR: hold periods); f1 with HLDA high 42 120, and [6, 6] per HOLD period (4N + 2 with N = 1,
-//    docs b; ERROR: hold time); f1 106 640 (ERROR: phi count).
+//    docs b; ERROR: hold time); f1 106 640 (ERROR: phi count). The window must not contain an 8275 Reset
+//    command (it stops the DMA; the monitor's second video init sends one later in the boot): ERROR: dma
+//    cost if it does.
 // 2. Samples: at every clk where the 8080 latches pin_din (dbin_pin high, k580vm80a.v:258) or loads its
 //    opcode register (~f2 & (reset | m1 & t3), :538), cpu_i must be the reference byte of the CPU's
 //    address: the monitor in start-up (the TB's su_exp) and at E000-FFFF, the RAM shadow below 8000, the
@@ -263,6 +265,9 @@ always @(posedge clk) if (!`M16.done && !fin) begin
         end else if (w_a[15:13] == 3'b110 && w_a[0] && w_d == 8'h00) begin     // the 8275 Reset command
             c_rst = 1'b1; fs_ok = 1'b0; n_cr = n_cr + 1;
             $display("INFO: dma byte: 8275 Reset command (ce16 %0d, frame %0d)", `M16.n16, fr);
+            if (win) begin                                          // it stops the DMA: the cost would not be 3 x 2340
+                $display("ERROR: dma cost: the cost window (frames %0d..%0d) contains an 8275 Reset (ce16 %0d, frame %0d)",
+                         `M16.fa, `M16.fa + 2, `M16.n16, fr); err; end
         end
     end
     wr_q = `D16.cpu.pin_wr_n;
