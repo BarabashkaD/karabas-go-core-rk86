@@ -41,6 +41,18 @@ now and waits for a check on a real chip (next section).
 - To return to the strict reading: revert the commit "vg75 underrun: the DMA restarts with the row-0 fill"
   and swap the fault back (`vg75_underrun_restart_early`).
 
+### 8257: the state after the DRQ sample (`k580vt57.v`; review 2026-11-11, item M9; not merged for now)
+
+- Data sheet: Fig. 6 note 1 and the waveform on 12-110 ([C78] 1978 Intel Component Data Catalog): after
+  the DRQ sample the 8257 stays in SI with HRQ raised and enters S0 one θ↓ later (both blind readings of
+  2026-11-11 agree).
+- Model on the main line: S0 at the θ↓ that samples DRQ. The pins are the same unless HLDA is already
+  high 9 ce16 after the sample; an 8080 raises HLDA later than that, so the Radio-86RK cannot show the
+  difference.
+- The data sheet version is ready on the branch `rk86-16mhz-m9` (the RTL change, a check with HLDA held
+  high, a fault; the 8257 TBs and machine16 pass). Not merged for now (the maintainer, 2026-11-11): kept
+  for the real-hardware check below; a machine whose bus master raises HLDA early would need it.
+
 ## Follow-up: checks on real hardware
 
 Planned by the maintainer: on a real Radio-86RK (or any board with a real 8275 and 8257), with a logic
@@ -61,9 +73,11 @@ analyser. Not on the FPGA: an FPGA runs this model, so it cannot tell how the ch
 3. 8275 Reset command during a row fill: whether the fill in progress stops at once (the model: DMA and the
    fill stop; the partly filled row is shown as it is) and when DMA resumes after Start Display (S9: the
    model starts at the next row start with a fill due). Analyser: DRQ, DACK, WR, CS, A0.
-4. 8257 SI -> S0 after the DRQ sample (`k580vt57.v`; the two data sheet readings of 2026-11-11 put one more
-   SI state before S0, a change kept on the branch `rk86-16mhz-m9`): not visible with an 8080 (HLDA comes
-   later than the difference); only a board that drives HLDA high in advance would show it.
+4. 8257 SI -> S0 after the DRQ sample (the decision above, branch `rk86-16mhz-m9`): not visible with an
+   8080 (HLDA comes later than the difference). On the bench: hold the 8257's HLDA input high from a
+   test fixture (not from the CPU) before DRQ rises, and capture CLK, DRQ, HRQ, AEN with the analyser:
+   AEN (S1) 9 ce16 after the DRQ sample = the main line; one clock period later = the data sheet reading
+   on the branch.
 
 Record each result with the board, the chip markings and the analyser capture; a result that differs from
 the model changes the model and its tests, and this section.
